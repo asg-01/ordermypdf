@@ -15,6 +15,7 @@ from typing import List
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.config import settings
@@ -349,6 +350,16 @@ async def cleanup_temp_files():
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
+
+
+# ============================================
+# STATIC FILES (Pre-built frontend)
+# ============================================
+
+# Mount pre-built frontend dist folder if it exists
+frontend_dist_path = "frontend/dist"
+if os.path.exists(frontend_dist_path):
+    app.mount("/", StaticFiles(directory=frontend_dist_path, html=True), name="static")
 
 
 # ============================================
