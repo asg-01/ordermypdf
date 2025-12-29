@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy frontend files and build
 COPY frontend ./frontend
 WORKDIR /app/frontend
-RUN npm install && npm run build
+RUN npm install && chmod +x node_modules/.bin/* && npm run build
 
 # Copy backend files
 WORKDIR /app
