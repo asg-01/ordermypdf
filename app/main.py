@@ -189,9 +189,9 @@ def execute_operation(intent: ParsedIntent) -> tuple[str, str]:
 # API ENDPOINTS
 # ============================================
 
-@app.get("/")
+@app.get("/api/status")
 async def root():
-    """Health check endpoint"""
+    """Health check endpoint (moved to /api/status to allow SPA at root)"""
     return {
         "service": "OrderMyPDF",
         "status": "running",
