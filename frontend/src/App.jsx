@@ -583,6 +583,12 @@ export default function App() {
   const [elapsedTime, setElapsedTime] = useState(0); // seconds elapsed during processing
   const currentJobIdRef = useRef(null);
   const processingStartRef = useRef(null); // timestamp when processing started
+  
+  // Pre-upload state - files upload immediately when selected
+  const [preUploadId, setPreUploadId] = useState(null); // ID from /preupload endpoint
+  const [preUploadProgress, setPreUploadProgress] = useState(0); // 0-100
+  const [preUploadStatus, setPreUploadStatus] = useState("idle"); // "idle" | "uploading" | "ready" | "error"
+  const preUploadXhrRef = useRef(null); // XHR for cancellation
 
   const statusPhrases = useMemo(
     () => [
@@ -915,13 +921,84 @@ export default function App() {
     };
   }, [loading]);
 
-  // Reference to track if we should auto-submit after file selection
-  const pendingAutoSubmitRef = useRef(null);
+  // Start pre-upload immediately when files are selected
+  const startPreUpload = useCallback(async (selectedFiles) => {
+    if (!selectedFiles || selectedFiles.length === 0) return;
+    
+    // Cancel any existing pre-upload
+    if (preUploadXhrRef.current) {
+      preUploadXhrRef.current.abort();
+    }
+    
+    // Reset pre-upload state
+    setPreUploadId(null);
+    setPreUploadProgress(0);
+    setPreUploadStatus("uploading");
+    
+    const formData = new FormData();
+    selectedFiles.forEach((file) => formData.append("files", file));
+    
+    try {
+      const result = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        preUploadXhrRef.current = xhr;
+        
+        // Set timeout (10 minutes for large files)
+        xhr.timeout = 600000;
+        
+        xhr.upload.addEventListener("progress", (e) => {
+          if (e.lengthComputable) {
+            const percent = Math.round((e.loaded / e.total) * 100);
+            setPreUploadProgress(percent);
+          }
+        });
+        
+        xhr.addEventListener("load", () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch (e) {
+              reject(new Error("Invalid server response"));
+            }
+          } else if (xhr.status === 0) {
+            reject(new Error("Connection lost"));
+          } else {
+            reject(new Error(`Upload failed (${xhr.status})`));
+          }
+        });
+        
+        xhr.addEventListener("error", () => reject(new Error("Connection failed")));
+        xhr.addEventListener("timeout", () => reject(new Error("Upload timed out")));
+        xhr.addEventListener("abort", () => reject(new Error("Cancelled")));
+        
+        xhr.open("POST", "/preupload");
+        xhr.send(formData);
+      });
+      
+      // Pre-upload successful
+      setPreUploadId(result.upload_id);
+      setPreUploadStatus("ready");
+      setPreUploadProgress(100);
+      console.log("[PreUpload] Complete:", result.upload_id);
+      
+    } catch (err) {
+      console.error("[PreUpload] Failed:", err);
+      setPreUploadStatus("error");
+      // Don't show error toast - user can still use normal upload on submit
+    } finally {
+      preUploadXhrRef.current = null;
+    }
+  }, []);
   
   const handleFileChange = (e) => {
     const selected = Array.from(e.target.files || []);
     setFiles(selected);
     setLastFileName(selected.length ? selected[selected.length - 1].name : "");
+
+    // Reset any previous pre-upload
+    setPreUploadId(null);
+    setPreUploadProgress(0);
+    setPreUploadStatus("idle");
 
     // Show warning immediately when large files are selected
     if (selected.length > 0) {
@@ -930,23 +1007,13 @@ export default function App() {
         showToast(
           `⚠️ Large file (${Math.round(
             totalSizeMB
-          )}MB) detected. Processing may take several minutes.`,
-          6000
+          )}MB) detected. Upload starting...`,
+          4000
         );
       }
       
-      // If there's already a prompt entered, auto-submit after a brief delay
-      // This allows "instant upload" behavior
-      if (prompt.trim()) {
-        pendingAutoSubmitRef.current = prompt.trim();
-        // Small delay to let state update
-        setTimeout(() => {
-          if (pendingAutoSubmitRef.current && selected.length > 0) {
-            submit(pendingAutoSubmitRef.current);
-            pendingAutoSubmitRef.current = null;
-          }
-        }, 100);
-      }
+      // Start pre-upload immediately!
+      startPreUpload(selected);
     }
   };
 
@@ -1070,9 +1137,18 @@ export default function App() {
     setPrompt("");
 
     // Show mobile-friendly upload message
-    const uploadMessage = isMobileDevice()
-      ? "Uploading files... (Keep app open for best results)"
-      : "Uploading files...";
+    // Determine status message based on pre-upload state
+    const getStatusMessage = () => {
+      if (preUploadStatus === "ready") {
+        return "Files ready! Starting processing...";
+      } else if (preUploadStatus === "uploading") {
+        return `Waiting for upload... ${preUploadProgress}%`;
+      } else {
+        return isMobileDevice()
+          ? "Uploading files... (Keep app open)"
+          : "Uploading files...";
+      }
+    };
 
     setMessages((prev) => [
       ...prev,
@@ -1082,105 +1158,207 @@ export default function App() {
         tone: "neutral",
         text: pendingClarification ? rawUserText : userText,
       },
-      { id: makeId(), role: "agent", tone: "status", text: uploadMessage },
+      { id: makeId(), role: "agent", tone: "status", text: getStatusMessage() },
     ]);
 
-    const formData = new FormData();
-    files.forEach((file) => formData.append("files", file));
-    formData.append("prompt", userText);
-    if (pendingClarification?.question) {
-      formData.append("context_question", pendingClarification.question);
-    }
-    formData.append("session_id", sessionIdRef.current);
-
     try {
-      // Create abort controller for polling (upload uses XHR)
+      // Create abort controller for polling
       abortControllerRef.current = new AbortController();
 
-      // Request Wake Lock to prevent device sleep during upload (mobile support)
+      // Request Wake Lock to prevent device sleep
       try {
         wakeLockRef.current = await requestWakeLock();
       } catch (e) {
         // Wake lock not critical
       }
 
-      // Step 1: Upload with progress tracking using XMLHttpRequest
-      const uploadResult = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        
-        // Set timeout for upload (10 minutes for large files)
-        xhr.timeout = 600000;
+      let jobId;
 
-        xhr.upload.addEventListener("progress", (e) => {
-          if (e.lengthComputable) {
-            const percent = Math.round((e.loaded / e.total) * 100);
-            setUploadProgress(percent);
-            // Update status message with upload progress
-            setMessages((prev) => {
-              const trimmed = prev.filter((m, idx) => {
-                if (idx !== prev.length - 1) return true;
-                return !(m.role === "agent" && m.tone === "status");
-              });
-              return [
-                ...trimmed,
-                {
-                  id: makeId(),
-                  role: "agent",
-                  tone: "status",
-                  text: `Uploading... ${percent}%`,
-                },
-              ];
+      // Check if we have a completed pre-upload
+      if (preUploadStatus === "ready" && preUploadId) {
+        // Use the pre-uploaded files - instant!
+        console.log("[Submit] Using pre-uploaded files:", preUploadId);
+        setIsUploading(false);
+        setUploadProgress(100);
+        
+        const formData = new FormData();
+        formData.append("upload_id", preUploadId);
+        formData.append("prompt", userText);
+        if (pendingClarification?.question) {
+          formData.append("context_question", pendingClarification.question);
+        }
+        formData.append("session_id", sessionIdRef.current);
+        
+        const response = await fetch("/submit-with-upload", {
+          method: "POST",
+          body: formData,
+          signal: abortControllerRef.current.signal,
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.detail || `Server error (${response.status})`);
+        }
+        
+        const result = await response.json();
+        jobId = result.job_id;
+        
+        // Clear pre-upload state
+        setPreUploadId(null);
+        setPreUploadStatus("idle");
+        
+      } else if (preUploadStatus === "uploading") {
+        // Pre-upload in progress - wait for it then submit
+        console.log("[Submit] Waiting for pre-upload to complete...");
+        
+        // Update status to show waiting
+        setMessages((prev) => {
+          const trimmed = prev.filter((m, idx) => {
+            if (idx !== prev.length - 1) return true;
+            return !(m.role === "agent" && m.tone === "status");
+          });
+          return [
+            ...trimmed,
+            {
+              id: makeId(),
+              role: "agent",
+              tone: "status",
+              text: `Upload in progress... ${preUploadProgress}%`,
+            },
+          ];
+        });
+        
+        // Poll until pre-upload completes
+        while (preUploadStatus === "uploading") {
+          await new Promise((r) => setTimeout(r, 200));
+          // Update the progress display
+          setMessages((prev) => {
+            const trimmed = prev.filter((m, idx) => {
+              if (idx !== prev.length - 1) return true;
+              return !(m.role === "agent" && m.tone === "status");
             });
+            return [
+              ...trimmed,
+              {
+                id: makeId(),
+                role: "agent",
+                tone: "status",
+                text: `Upload in progress... ${preUploadProgress}%`,
+              },
+            ];
+          });
+        }
+        
+        // Check if preupload succeeded
+        if (preUploadStatus === "ready" && preUploadId) {
+          const formData = new FormData();
+          formData.append("upload_id", preUploadId);
+          formData.append("prompt", userText);
+          if (pendingClarification?.question) {
+            formData.append("context_question", pendingClarification.question);
           }
-        });
+          formData.append("session_id", sessionIdRef.current);
+          
+          setIsUploading(false);
+          setUploadProgress(100);
+          
+          const response = await fetch("/submit-with-upload", {
+            method: "POST",
+            body: formData,
+            signal: abortControllerRef.current.signal,
+          });
+          
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || `Server error (${response.status})`);
+          }
+          
+          const result = await response.json();
+          jobId = result.job_id;
+          
+          // Clear pre-upload state
+          setPreUploadId(null);
+          setPreUploadStatus("idle");
+        } else {
+          // Pre-upload failed, fall back to regular upload
+          throw new Error("Pre-upload failed. Retrying with normal upload...");
+        }
+        
+      } else {
+        // No pre-upload, do regular upload
+        console.log("[Submit] No pre-upload, doing regular upload");
+        
+        const formData = new FormData();
+        files.forEach((file) => formData.append("files", file));
+        formData.append("prompt", userText);
+        if (pendingClarification?.question) {
+          formData.append("context_question", pendingClarification.question);
+        }
+        formData.append("session_id", sessionIdRef.current);
 
-        xhr.addEventListener("load", () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              resolve(JSON.parse(xhr.responseText));
-            } catch (e) {
-              reject(new Error("Invalid response from server. Please try again."));
+        // Upload with progress tracking
+        const uploadResult = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.timeout = 600000;
+
+          xhr.upload.addEventListener("progress", (e) => {
+            if (e.lengthComputable) {
+              const percent = Math.round((e.loaded / e.total) * 100);
+              setUploadProgress(percent);
+              setMessages((prev) => {
+                const trimmed = prev.filter((m, idx) => {
+                  if (idx !== prev.length - 1) return true;
+                  return !(m.role === "agent" && m.tone === "status");
+                });
+                return [
+                  ...trimmed,
+                  {
+                    id: makeId(),
+                    role: "agent",
+                    tone: "status",
+                    text: `Uploading... ${percent}%`,
+                  },
+                ];
+              });
             }
-          } else if (xhr.status === 0) {
-            // Status 0 usually means network error or CORS issue
-            reject(new Error("Connection lost. Please check your internet and try again."));
-          } else {
-            reject(new Error(`Server error (${xhr.status}). Please try again.`));
-          }
+          });
+
+          xhr.addEventListener("load", () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                resolve(JSON.parse(xhr.responseText));
+              } catch (e) {
+                reject(new Error("Invalid server response"));
+              }
+            } else if (xhr.status === 0) {
+              reject(new Error("Connection lost"));
+            } else {
+              reject(new Error(`Server error (${xhr.status})`));
+            }
+          });
+
+          xhr.addEventListener("error", () => reject(new Error("Connection failed")));
+          xhr.addEventListener("timeout", () => reject(new Error("Upload timed out")));
+          xhr.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")));
+
+          xhr.open("POST", "/submit");
+          xhr.send(formData);
+          abortControllerRef.current.xhr = xhr;
         });
 
-        xhr.addEventListener("error", () => {
-          reject(new Error("Connection failed. Please check your internet and try again."));
-        });
-        
-        xhr.addEventListener("timeout", () => {
-          reject(new Error("Upload timed out. Please try with a smaller file or better connection."));
-        });
-        
-        xhr.addEventListener("abort", () =>
-          reject(new DOMException("Cancelled", "AbortError"))
-        );
+        jobId = uploadResult.job_id;
+        setIsUploading(false);
+        setUploadProgress(100);
+      }
 
-        xhr.open("POST", "/submit");
-        xhr.send(formData);
-
-        // Store xhr for cancellation
-        abortControllerRef.current.xhr = xhr;
-      });
-
-      const jobId = uploadResult.job_id;
       currentJobIdRef.current = jobId;
 
       // Save job to localStorage for recovery
       savePendingJob(jobId, userText, files[0]?.name || "file", estTime);
 
-      // Upload complete - release wake lock
+      // Release wake lock
       await releaseWakeLock(wakeLockRef.current);
       wakeLockRef.current = null;
-
-      // Upload complete - switch to processing phase
-      setIsUploading(false);
-      setUploadProgress(100);
       setEstimatedTime(estTime);
       setProcessingMessage("Processing started...");
       processingStartRef.current = Date.now(); // Start timing
@@ -1646,10 +1824,24 @@ export default function App() {
                         )}
                       </div>
                       {files.length ? (
-                        <div className="mt-1 text-[11px] text-slate-400">
-                          {hasMultiple
-                            ? "We’ll process all selected PDFs."
-                            : "Ready to process."}
+                        <div className="mt-1 text-[11px]">
+                          {preUploadStatus === "uploading" ? (
+                            <span className="text-cyan-300 flex items-center gap-1">
+                              {Icons.upload} Uploading... {preUploadProgress}%
+                            </span>
+                          ) : preUploadStatus === "ready" ? (
+                            <span className="text-green-300 flex items-center gap-1">
+                              {Icons.checkCircle} Ready! Type your command.
+                            </span>
+                          ) : preUploadStatus === "error" ? (
+                            <span className="text-amber-300">
+                              Will retry on submit.
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">
+                              {hasMultiple ? "Processing all files." : "Ready to process."}
+                            </span>
+                          )}
                         </div>
                       ) : null}
                     </div>

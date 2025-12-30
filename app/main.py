@@ -301,6 +301,7 @@ async def startup_event():
     scheduler.add_job(cleanup_old_files, 'interval', minutes=2)  # Run cleanup every 2 minutes
     scheduler.add_job(lambda: cleanup_old_sessions(30), 'interval', minutes=10)  # Purge idle sessions
     scheduler.add_job(job_queue.cleanup_old_jobs, 'interval', minutes=5)  # Clean old jobs
+    scheduler.add_job(_cleanup_old_preuploads, 'interval', minutes=5)  # Clean old preuploads
     scheduler.start()
     print("[OK] Auto-cleanup scheduler started (files deleted after 10 minutes)")
 
@@ -839,9 +840,135 @@ async def root():
     }
 
 
+# Store for pre-uploaded files (upload_id -> list of file names)
+_PREUPLOADS: dict[str, dict] = {}
+_PREUPLOADS_LOCK = Lock()
+
+
+def _cleanup_old_preuploads(max_age_minutes: int = 15) -> None:
+    """Remove pre-uploads older than max_age_minutes"""
+    cutoff = time.time() - (max_age_minutes * 60)
+    with _PREUPLOADS_LOCK:
+        stale = [uid for uid, data in _PREUPLOADS.items() if data.get("created_at", 0) < cutoff]
+        for uid in stale:
+            # Also delete the uploaded files
+            for fname in _PREUPLOADS[uid].get("files", []):
+                try:
+                    fpath = os.path.join("uploads", fname)
+                    if os.path.exists(fpath):
+                        os.remove(fpath)
+                except Exception:
+                    pass
+            _PREUPLOADS.pop(uid, None)
+        if stale:
+            print(f"[PREUPLOAD CLEANUP] Removed {len(stale)} old pre-uploads")
+
+
 # ============================================
 # JOB QUEUE ENDPOINTS (New async-friendly API)
 # ============================================
+
+@app.post("/preupload")
+async def preupload_files(
+    files: List[UploadFile] = File(..., description="PDF/image files to pre-upload"),
+):
+    """
+    Pre-upload files immediately when user selects them.
+    
+    Returns an upload_id that can be used with /submit-with-upload to process later.
+    This allows users to type their prompt while files are uploading.
+    """
+    try:
+        # Validate file count
+        if len(files) > settings.max_files_per_request:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Too many files. Maximum {settings.max_files_per_request} files allowed."
+            )
+        
+        # Save uploaded files
+        file_names = await save_uploaded_files(files)
+        
+        # Generate upload ID
+        import uuid
+        upload_id = str(uuid.uuid4())[:12]
+        
+        # Store the mapping
+        with _PREUPLOADS_LOCK:
+            _PREUPLOADS[upload_id] = {
+                "files": file_names,
+                "created_at": time.time(),
+            }
+        
+        print(f"[PREUPLOAD] {upload_id} - Files: {file_names}")
+        
+        return {
+            "upload_id": upload_id,
+            "files": file_names,
+            "message": "Files uploaded successfully. Use /submit-with-upload to process.",
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload files: {str(e)}")
+
+
+@app.post("/submit-with-upload")
+async def submit_with_preupload(
+    upload_id: str = Form(..., description="Upload ID from /preupload"),
+    prompt: str = Form(..., description="Natural language instruction"),
+    context_question: str | None = Form(default=None),
+    session_id: str | None = Form(default=None),
+):
+    """
+    Submit a job using pre-uploaded files.
+    
+    Use this after calling /preupload. This allows users to type prompts while files upload.
+    """
+    try:
+        # Get the pre-uploaded files
+        with _PREUPLOADS_LOCK:
+            preupload_data = _PREUPLOADS.pop(upload_id, None)
+        
+        if not preupload_data:
+            raise HTTPException(
+                status_code=404,
+                detail="Upload not found. Files may have expired (15 min limit). Please re-upload."
+            )
+        
+        file_names = preupload_data["files"]
+        
+        # Verify files still exist
+        for fname in file_names:
+            fpath = os.path.join("uploads", fname)
+            if not os.path.exists(fpath):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Uploaded file {fname} not found. Please re-upload."
+                )
+        
+        # Create job (starts processing in background)
+        job_id = job_queue.create_job(
+            files=file_names,
+            prompt=prompt,
+            session_id=session_id,
+            context_question=context_question,
+        )
+        
+        print(f"[JOB CREATED from preupload] {job_id} - Files: {file_names}, Prompt: {prompt[:50]}...")
+        
+        return {
+            "job_id": job_id,
+            "status": "pending",
+            "message": "Job submitted successfully. Poll /job/{job_id}/status for progress.",
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to submit job: {str(e)}")
+
 
 @app.post("/submit")
 async def submit_job(
@@ -877,6 +1004,7 @@ async def submit_job(
         )
         
         print(f"[JOB CREATED] {job_id} - Files: {file_names}, Prompt: {prompt[:50]}...")
+        
         
         return {
             "job_id": job_id,
