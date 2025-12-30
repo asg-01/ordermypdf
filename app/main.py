@@ -1032,12 +1032,13 @@ async def get_job_status(job_id: str):
     """
     Get the current status and progress of a job.
     
-    Poll this endpoint every 2-3 seconds while status is "pending" or "processing".
+    Poll this endpoint every 2 seconds while status is "pending" or "processing".
     
     Returns:
     - status: "pending" | "processing" | "completed" | "failed" | "cancelled"
     - progress: 0-100
     - message: Human-readable progress message
+    - estimated_remaining: Dynamic estimated seconds remaining
     - result: (only when completed) Contains output_file, operation, etc.
     """
     job = job_queue.get_job(job_id)
@@ -1053,15 +1054,23 @@ async def get_job_status(job_id: str):
         "created_at": job.created_at,
     }
     
-    # Add timing info
-    if job.started_at:
-        response["started_at"] = job.started_at
-        response["elapsed_seconds"] = time.time() - job.started_at
+    # Calculate dynamic estimated time remaining
+    if job.started_at and job.progress > 0 and job.status == JobStatus.PROCESSING:
+        elapsed = time.time() - job.started_at
+        # Estimate total time based on current progress
+        if job.progress < 100:
+            estimated_total = elapsed / (job.progress / 100)
+            estimated_remaining = max(0, estimated_total - elapsed)
+            response["estimated_remaining"] = round(estimated_remaining)
+        else:
+            response["estimated_remaining"] = 0
+    elif job.status == JobStatus.PENDING:
+        response["estimated_remaining"] = 30  # Default estimate for pending
+    else:
+        response["estimated_remaining"] = 0
     
     if job.completed_at:
         response["completed_at"] = job.completed_at
-        if job.started_at:
-            response["processing_time_seconds"] = job.completed_at - job.started_at
     
     # Add result data when job is done
     if job.status in (JobStatus.COMPLETED, JobStatus.FAILED):

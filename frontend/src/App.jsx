@@ -576,13 +576,10 @@ export default function App() {
 
   const [toast, setToast] = useState(null);
   const [downloadBlink, setDownloadBlink] = useState(false);
-  const [estimatedTime, setEstimatedTime] = useState("");
   const [uploadProgress, setUploadProgress] = useState(0); // 0-100 for upload phase
   const [isUploading, setIsUploading] = useState(false); // true during upload, false during processing
   const [processingMessage, setProcessingMessage] = useState("");
-  const [elapsedTime, setElapsedTime] = useState(0); // seconds elapsed during processing
   const currentJobIdRef = useRef(null);
-  const processingStartRef = useRef(null); // timestamp when processing started
   
   // Pre-upload state - files upload immediately when selected
   const [preUploadId, setPreUploadId] = useState(null); // ID from /preupload endpoint
@@ -644,36 +641,12 @@ export default function App() {
     resumePendingJob(pending);
   }, []);
 
-  // Elapsed time tracker during processing
-  useEffect(() => {
-    if (!loading || isUploading) {
-      setElapsedTime(0);
-      processingStartRef.current = null;
-      return;
-    }
-    
-    // Start tracking when processing begins (not uploading)
-    if (!processingStartRef.current) {
-      processingStartRef.current = Date.now();
-    }
-    
-    const interval = setInterval(() => {
-      if (processingStartRef.current) {
-        const elapsed = Math.floor((Date.now() - processingStartRef.current) / 1000);
-        setElapsedTime(elapsed);
-      }
-    }, 1000);
-    
-    return () => clearInterval(interval);
-  }, [loading, isUploading]);
-
   // Resume polling for a recovered job
   const resumePendingJob = async (pending) => {
-    const { jobId, prompt, fileName, estTime } = pending;
+    const { jobId, prompt, fileName } = pending;
 
     setLoading(true);
     setIsUploading(false);
-    setEstimatedTime(estTime || "~30s");
     setProcessingMessage("Checking job status...");
     currentJobIdRef.current = jobId;
     abortControllerRef.current = new AbortController();
@@ -691,14 +664,14 @@ export default function App() {
     try {
       let completed = false;
       let pollCount = 0;
-      const maxPolls = 600;
+      const maxPolls = 300; // 10 minutes at 2 second intervals
 
       while (!completed && pollCount < maxPolls) {
         if (abortControllerRef.current?.signal.aborted) {
           throw new DOMException("Cancelled", "AbortError");
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 2000)); // Poll every 2 seconds
         pollCount++;
 
         const statusRes = await fetch(`/job/${jobId}/status`, {
@@ -732,6 +705,12 @@ export default function App() {
         const statusData = await statusRes.json();
         setProcessingMessage(statusData.message || "Processing...");
 
+        // Get dynamic estimated time from backend
+        const estRemaining = statusData.estimated_remaining || 0;
+        const estStr = estRemaining < 60 
+          ? `~${estRemaining}s` 
+          : `~${Math.floor(estRemaining / 60)}m ${estRemaining % 60}s`;
+
         setMessages((prev) => {
           const trimmed = prev.filter((m) => m.tone !== "status");
           return [
@@ -740,9 +719,7 @@ export default function App() {
               id: makeId(),
               role: "agent",
               tone: "status",
-              text: `${
-                statusData.message || "Processing..."
-              } (Est: ${estTime})`,
+              text: `${statusData.message || "Processing..."} (Est: ${estStr})`,
             },
           ];
         });
@@ -767,7 +744,6 @@ export default function App() {
               message: resultData.message,
               operation: resultData.operation,
             });
-            setEstimatedTime("");
             setProcessingMessage("Complete!");
             setDownloadBlink(true);
             setTimeout(() => setDownloadBlink(false), 1600);
@@ -802,7 +778,6 @@ export default function App() {
       }
     } catch (err) {
       currentJobIdRef.current = null;
-      setEstimatedTime("");
       setProcessingMessage("");
       clearPendingJob();
       setRecoveredJob(null);
@@ -1048,7 +1023,6 @@ export default function App() {
     clearPendingJob(); // Clear localStorage when stopped
 
     setLoading(false);
-    setEstimatedTime("");
     setUploadProgress(0);
     setIsUploading(false);
     setProcessingMessage("");
@@ -1100,7 +1074,6 @@ export default function App() {
     setUploadProgress(0);
     setIsUploading(true);
     setProcessingMessage("");
-    setEstimatedTime("");
 
     const rawUserText = rawInput;
 
@@ -1302,9 +1275,7 @@ export default function App() {
       // Release wake lock
       await releaseWakeLock(wakeLockRef.current);
       wakeLockRef.current = null;
-      setEstimatedTime(estTime);
       setProcessingMessage("Processing started...");
-      processingStartRef.current = Date.now(); // Start timing
 
       // Update status message for processing
       setMessages((prev) => {
@@ -1318,7 +1289,7 @@ export default function App() {
             id: makeId(),
             role: "agent",
             tone: "status",
-            text: `Processing... (0s / Est: ${estTime})`,
+            text: `Processing... (Est: ~30s)`,
           },
         ];
       });
@@ -1326,7 +1297,7 @@ export default function App() {
       // Step 2: Poll for status until done
       let completed = false;
       let pollCount = 0;
-      const maxPolls = 600; // 10 minutes at 1 second intervals
+      const maxPolls = 300; // 10 minutes at 2 second intervals
 
       while (!completed && pollCount < maxPolls) {
         // Check if cancelled
@@ -1334,7 +1305,7 @@ export default function App() {
           throw new DOMException("Cancelled", "AbortError");
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 1500)); // Poll every 1.5 seconds
+        await new Promise((resolve) => setTimeout(resolve, 2000)); // Poll every 2 seconds
         pollCount++;
 
         const statusRes = await fetch(`/job/${jobId}/status`, {
@@ -1350,15 +1321,13 @@ export default function App() {
         // Update processing message
         setProcessingMessage(statusData.message || "Processing...");
 
-        // Calculate elapsed time for display
-        const currentElapsed = processingStartRef.current 
-          ? Math.floor((Date.now() - processingStartRef.current) / 1000)
-          : 0;
-        const elapsedStr = currentElapsed < 60 
-          ? `${currentElapsed}s` 
-          : `${Math.floor(currentElapsed / 60)}m ${currentElapsed % 60}s`;
+        // Get dynamic estimated time from backend
+        const estRemaining = statusData.estimated_remaining || 0;
+        const estStr = estRemaining < 60 
+          ? `~${estRemaining}s` 
+          : `~${Math.floor(estRemaining / 60)}m ${estRemaining % 60}s`;
 
-        // Update the status bubble with elapsed time
+        // Update the status bubble with dynamic estimated time
         setMessages((prev) => {
           const trimmed = prev.filter((m, idx) => {
             if (idx !== prev.length - 1) return true;
@@ -1370,9 +1339,7 @@ export default function App() {
               id: makeId(),
               role: "agent",
               tone: "status",
-              text: `${
-                statusData.message || "Processing..."
-              } (${elapsedStr} / Est: ${estTime})`,
+              text: `${statusData.message || "Processing..."} (Est: ${estStr})`,
             },
           ];
         });
@@ -1405,7 +1372,6 @@ export default function App() {
             });
             setPendingClarification(null);
             setClarification("");
-            setEstimatedTime("");
             setProcessingMessage("Complete!");
             // Trigger download button blink
             setDownloadBlink(true);
@@ -1465,12 +1431,9 @@ export default function App() {
       }
     } catch (err) {
       currentJobIdRef.current = null;
-      setEstimatedTime("");
       setUploadProgress(0);
       setIsUploading(false);
       setProcessingMessage("");
-      setElapsedTime(0);
-      processingStartRef.current = null;
 
       const msg =
         err?.name === "AbortError"
@@ -1497,7 +1460,6 @@ export default function App() {
       // Release wake lock if still held (error case)
       await releaseWakeLock(wakeLockRef.current);
       wakeLockRef.current = null;
-      processingStartRef.current = null;
     }
   };
 
@@ -1683,19 +1645,6 @@ export default function App() {
                                 : processingMessage ||
                                   "Processing your request..."}
                             </span>
-                            {/* Show elapsed/estimated time during processing (not upload) */}
-                            {!isUploading && estimatedTime && (
-                              <span className="text-xs text-cyan-300/80 flex items-center gap-1">
-                                {Icons.clock}
-                                {elapsedTime > 0 ? (
-                                  <>
-                                    {elapsedTime < 60 ? `${elapsedTime}s` : `${Math.floor(elapsedTime / 60)}m ${elapsedTime % 60}s`} / Est: {estimatedTime}
-                                  </>
-                                ) : (
-                                  <>Est: {estimatedTime}</>
-                                )}
-                              </span>
-                            )}
                           </div>
                         </div>
                         {/* Progress bar only during upload */}
@@ -2108,7 +2057,7 @@ export default function App() {
                           Processing
                         </div>
                         <div className="text-cyan-100 font-medium text-sm">
-                          {estimatedTime || "Working..."}
+                          {processingMessage || "Working..."}
                         </div>
                       </>
                     )}
