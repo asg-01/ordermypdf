@@ -891,13 +891,13 @@ export default function App() {
     setFiles(selected);
     setLastFileName(selected.length ? selected[selected.length - 1].name : "");
 
-    // Show warning for large files
+    // Show warning for large files (50MB+)
     if (selected.length > 0) {
       const totalSizeMB = getTotalFileSizeMB(selected);
       if (totalSizeMB > 50) {
         showToast(
-          `⚠️ Large file (${Math.round(totalSizeMB)}MB). Processing may take longer.`,
-          4000
+          `📁 Large file (${Math.round(totalSizeMB)}MB) — expect longer processing time`,
+          5000
         );
       }
     }
