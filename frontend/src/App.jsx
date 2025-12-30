@@ -201,24 +201,50 @@ function getTotalFileSizeMB(files) {
   return files.reduce((sum, f) => sum + (f.size || 0), 0) / (1024 * 1024);
 }
 
-// Estimate wait time based on file size and operation
+// Estimate wait time based on file size and operation (processing only, not upload)
 function estimateWaitTime(sizeMB, prompt) {
   const lower = (prompt || "").toLowerCase();
-  let baseSeconds = sizeMB * 0.8; // ~0.8s per MB baseline
-
-  // Compression takes longer
-  if (/compress/i.test(lower)) baseSeconds = sizeMB * 1.5;
-  // OCR is slowest
-  if (/ocr/i.test(lower)) baseSeconds = sizeMB * 3;
+  
+  // Base processing time (server-side, after upload completes)
+  // These are calibrated based on actual Render server performance
+  let baseSeconds;
+  
+  // OCR is CPU-intensive
+  if (/ocr/i.test(lower)) {
+    baseSeconds = 10 + sizeMB * 0.5; // ~10s base + 0.5s per MB
+  }
   // PDF to DOCX conversion
-  if (/docx|word/i.test(lower)) baseSeconds = sizeMB * 2;
+  else if (/docx|word/i.test(lower)) {
+    baseSeconds = 8 + sizeMB * 0.4;
+  }
+  // Compression with target
+  else if (/compress/i.test(lower)) {
+    // Iterative compression is slower for large files
+    if (sizeMB > 50) {
+      baseSeconds = 15 + sizeMB * 0.3;
+    } else {
+      baseSeconds = 8 + sizeMB * 0.25;
+    }
+  }
+  // PDF to images
+  else if (/png|jpg|jpeg|image/i.test(lower)) {
+    baseSeconds = 5 + sizeMB * 0.3;
+  }
+  // Simple operations (merge, split, rotate, etc.)
+  else {
+    baseSeconds = 3 + sizeMB * 0.1;
+  }
 
-  // Minimum 5 seconds, cap at 10 minutes display
-  const seconds = Math.max(5, Math.min(600, Math.round(baseSeconds)));
+  // Add AI parsing overhead (~2-3 seconds)
+  baseSeconds += 3;
+
+  // Round to reasonable display
+  const seconds = Math.max(5, Math.round(baseSeconds));
 
   if (seconds < 60) return `~${seconds}s`;
+  if (seconds < 120) return "~1 min";
   const mins = Math.round(seconds / 60);
-  return `~${mins} min${mins > 1 ? "s" : ""}`;
+  return `~${mins} mins`;
 }
 
 // Check if prompt has specific compression target
@@ -485,8 +511,9 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [downloadBlink, setDownloadBlink] = useState(false);
   const [estimatedTime, setEstimatedTime] = useState("");
-  const [jobProgress, setJobProgress] = useState(0);
-  const [jobMessage, setJobMessage] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(0); // 0-100 for upload phase
+  const [isUploading, setIsUploading] = useState(false); // true during upload, false during processing
+  const [processingMessage, setProcessingMessage] = useState("");
   const currentJobIdRef = useRef(null);
 
   const statusPhrases = useMemo(
@@ -663,8 +690,9 @@ export default function App() {
     
     setLoading(false);
     setEstimatedTime("");
-    setJobProgress(0);
-    setJobMessage("");
+    setUploadProgress(0);
+    setIsUploading(false);
+    setProcessingMessage("");
     showToast("⏹️ Process stopped by user.", 3000);
     setMessages((prev) => [
       ...prev.filter((m, idx) => {
@@ -692,22 +720,23 @@ export default function App() {
       showToast(
         `⏳ Large file (${Math.round(
           totalSizeMB
-        )}MB) — processing may take several minutes. Please wait...`,
+        )}MB) — upload depends on your network speed.`,
         6000
       );
     }
 
-    // Calculate and set estimated time
+    // Calculate estimated processing time (shown after upload completes)
     const estTime = estimateWaitTime(totalSizeMB, rawInput);
-    setEstimatedTime(estTime);
 
     setLoading(true);
     setError("");
     setResult(null);
     setClarification("");
     setDownloadBlink(false);
-    setJobProgress(0);
-    setJobMessage("Uploading files...");
+    setUploadProgress(0);
+    setIsUploading(true);
+    setProcessingMessage("");
+    setEstimatedTime("");
 
     const rawUserText = rawInput;
 
@@ -733,8 +762,8 @@ export default function App() {
     // Auto-apply 25% compression target for plain "compress" commands
     let finalComposed = composed;
     if (isPlainCompress(composed) && !hasSpecificCompressionTarget(composed)) {
-      const totalSizeMB = getTotalFileSizeMB(files);
-      const targetMB = Math.max(1, Math.round(totalSizeMB * 0.25));
+      const fileSizeMB = getTotalFileSizeMB(files);
+      const targetMB = Math.max(1, Math.round(fileSizeMB * 0.25));
       finalComposed = `compress to ${targetMB}mb`;
     }
 
@@ -749,7 +778,6 @@ export default function App() {
         id: makeId(),
         role: "user",
         tone: "neutral",
-        // Show what user typed, but actually send the clarified prompt.
         text: pendingClarification ? rawUserText : userText,
       },
       { id: makeId(), role: "agent", tone: "status", text: "Uploading files..." },
@@ -764,28 +792,63 @@ export default function App() {
     formData.append("session_id", sessionIdRef.current);
 
     try {
-      // Create abort controller for upload and polling
+      // Create abort controller for polling (upload uses XHR)
       abortControllerRef.current = new AbortController();
 
-      // Step 1: Submit job (fast - just uploads files)
-      const submitRes = await fetch("/submit", {
-        method: "POST",
-        body: formData,
-        signal: abortControllerRef.current.signal,
+      // Step 1: Upload with progress tracking using XMLHttpRequest
+      const uploadResult = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        
+        xhr.upload.addEventListener("progress", (e) => {
+          if (e.lengthComputable) {
+            const percent = Math.round((e.loaded / e.total) * 100);
+            setUploadProgress(percent);
+            // Update status message with upload progress
+            setMessages((prev) => {
+              const trimmed = prev.filter((m, idx) => {
+                if (idx !== prev.length - 1) return true;
+                return !(m.role === "agent" && m.tone === "status");
+              });
+              return [
+                ...trimmed,
+                { id: makeId(), role: "agent", tone: "status", text: `Uploading... ${percent}%` },
+              ];
+            });
+          }
+        });
+
+        xhr.addEventListener("load", () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch (e) {
+              reject(new Error("Invalid response from server"));
+            }
+          } else {
+            reject(new Error(`Upload failed: ${xhr.status}`));
+          }
+        });
+
+        xhr.addEventListener("error", () => reject(new Error("Network error during upload")));
+        xhr.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")));
+
+        xhr.open("POST", "/submit");
+        xhr.send(formData);
+
+        // Store xhr for cancellation
+        abortControllerRef.current.xhr = xhr;
       });
 
-      if (!submitRes.ok) {
-        throw new Error(`Upload failed: ${submitRes.status}`);
-      }
-
-      const submitData = await submitRes.json();
-      const jobId = submitData.job_id;
+      const jobId = uploadResult.job_id;
       currentJobIdRef.current = jobId;
 
-      setJobProgress(10);
-      setJobMessage("Processing started...");
+      // Upload complete - switch to processing phase
+      setIsUploading(false);
+      setUploadProgress(100);
+      setEstimatedTime(estTime);
+      setProcessingMessage("Processing started...");
 
-      // Update status message
+      // Update status message for processing
       setMessages((prev) => {
         const trimmed = prev.filter((m, idx) => {
           if (idx !== prev.length - 1) return true;
@@ -793,7 +856,7 @@ export default function App() {
         });
         return [
           ...trimmed,
-          { id: makeId(), role: "agent", tone: "status", text: "Processing your request..." },
+          { id: makeId(), role: "agent", tone: "status", text: `Processing... (Est: ${estTime})` },
         ];
       });
 
@@ -821,11 +884,10 @@ export default function App() {
 
         const statusData = await statusRes.json();
         
-        // Update progress in UI
-        setJobProgress(statusData.progress || 0);
-        setJobMessage(statusData.message || "Processing...");
+        // Update processing message
+        setProcessingMessage(statusData.message || "Processing...");
 
-        // Update the status bubble with real progress
+        // Update the status bubble
         setMessages((prev) => {
           const trimmed = prev.filter((m, idx) => {
             if (idx !== prev.length - 1) return true;
@@ -837,7 +899,7 @@ export default function App() {
               id: makeId(), 
               role: "agent", 
               tone: "status", 
-              text: `${statusData.message || "Processing..."} (${statusData.progress || 0}%)` 
+              text: `${statusData.message || "Processing..."} (Est: ${estTime})` 
             },
           ];
         });
@@ -867,8 +929,7 @@ export default function App() {
             setPendingClarification(null);
             setClarification("");
             setEstimatedTime("");
-            setJobProgress(100);
-            setJobMessage("Complete!");
+            setProcessingMessage("Complete!");
             // Trigger download button blink
             setDownloadBlink(true);
             setTimeout(() => setDownloadBlink(false), 1600);
@@ -913,7 +974,6 @@ export default function App() {
         } else if (statusData.status === "cancelled") {
           completed = true;
           currentJobIdRef.current = null;
-          // Already handled by stopProcess
         }
       }
 
@@ -924,8 +984,9 @@ export default function App() {
     } catch (err) {
       currentJobIdRef.current = null;
       setEstimatedTime("");
-      setJobProgress(0);
-      setJobMessage("");
+      setUploadProgress(0);
+      setIsUploading(false);
+      setProcessingMessage("");
       
       const msg =
         err?.name === "AbortError"
@@ -1128,9 +1189,12 @@ export default function App() {
                           <span className="text-cyan-400">{Icons.cog}</span>
                           <div className="flex flex-col gap-1">
                             <span className="font-medium">
-                              {jobMessage || "Processing your request..."}
+                              {isUploading 
+                                ? `Uploading... ${uploadProgress}%` 
+                                : (processingMessage || "Processing your request...")}
                             </span>
-                            {estimatedTime && !jobProgress && (
+                            {/* Show estimated time only during processing (not upload) */}
+                            {!isUploading && estimatedTime && (
                               <span className="text-xs text-cyan-300/80 flex items-center gap-1">
                                 {Icons.clock}
                                 Estimated wait: {estimatedTime}
@@ -1138,16 +1202,20 @@ export default function App() {
                             )}
                           </div>
                         </div>
-                        {/* Progress bar */}
-                        <div className="w-full bg-slate-700/50 rounded-full h-2 overflow-hidden">
-                          <div 
-                            className="h-full bg-gradient-to-r from-cyan-500 to-teal-400 rounded-full transition-all duration-500 ease-out"
-                            style={{ width: `${jobProgress}%` }}
-                          />
-                        </div>
-                        <div className="text-xs text-cyan-300/70 text-right">
-                          {jobProgress}% complete
-                        </div>
+                        {/* Progress bar only during upload */}
+                        {isUploading && (
+                          <>
+                            <div className="w-full bg-slate-700/50 rounded-full h-2 overflow-hidden">
+                              <div 
+                                className="h-full bg-gradient-to-r from-cyan-500 to-teal-400 rounded-full transition-all duration-300 ease-out"
+                                style={{ width: `${uploadProgress}%` }}
+                              />
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              Upload speed depends on your network connection
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1490,7 +1558,7 @@ export default function App() {
                     {loading ? (
                       <>
                         <span className="text-cyan-400">{Icons.spinner}</span>
-                        Processing
+                        {isUploading ? "Uploading" : "Processing"}
                       </>
                     ) : result ? (
                       <>
@@ -1507,23 +1575,32 @@ export default function App() {
                 </div>
                 {loading && (
                   <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/10 px-3 py-2">
-                    <div className="text-[11px] text-cyan-300 flex items-center gap-1 mb-1">
-                      {Icons.clock}
-                      Progress
-                    </div>
-                    <div className="text-cyan-100 font-medium text-sm mb-1">
-                      {jobProgress}%
-                    </div>
-                    <div className="w-full bg-slate-700/50 rounded-full h-1.5 overflow-hidden">
-                      <div 
-                        className="h-full bg-cyan-400 rounded-full transition-all duration-300"
-                        style={{ width: `${jobProgress}%` }}
-                      />
-                    </div>
-                    {estimatedTime && jobProgress < 20 && (
-                      <div className="text-[10px] text-cyan-300/70 mt-1">
-                        Est: {estimatedTime}
-                      </div>
+                    {isUploading ? (
+                      <>
+                        <div className="text-[11px] text-cyan-300 flex items-center gap-1 mb-1">
+                          {Icons.upload}
+                          Uploading
+                        </div>
+                        <div className="text-cyan-100 font-medium text-sm mb-1">
+                          {uploadProgress}%
+                        </div>
+                        <div className="w-full bg-slate-700/50 rounded-full h-1.5 overflow-hidden">
+                          <div 
+                            className="h-full bg-cyan-400 rounded-full transition-all duration-300"
+                            style={{ width: `${uploadProgress}%` }}
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-[11px] text-cyan-300 flex items-center gap-1 mb-1">
+                          {Icons.clock}
+                          Processing
+                        </div>
+                        <div className="text-cyan-100 font-medium text-sm">
+                          {estimatedTime || "Working..."}
+                        </div>
+                      </>
                     )}
                   </div>
                 )}
