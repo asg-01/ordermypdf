@@ -1019,6 +1019,58 @@ async def submit_job(
             "job_id": job_id,
             "status": "pending",
             "message": "Job submitted successfully. Poll /job/{job_id}/status for progress.",
+            "uploaded_files": file_names,  # Return file names for reuse
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to submit job: {str(e)}")
+
+
+@app.post("/submit-reuse")
+async def submit_job_reuse(
+    file_names: str = Form(..., description="Comma-separated file names already on server"),
+    prompt: str = Form(..., description="Natural language instruction"),
+    context_question: str | None = Form(default=None),
+    session_id: str | None = Form(default=None),
+):
+    """
+    Submit a job using files already uploaded to the server.
+    
+    Use this for follow-up operations on the same files to avoid re-uploading.
+    """
+    try:
+        # Parse file names
+        files_list = [f.strip() for f in file_names.split(",") if f.strip()]
+        
+        if not files_list:
+            raise HTTPException(status_code=400, detail="No file names provided")
+        
+        # Verify all files exist
+        for fname in files_list:
+            fpath = get_upload_path(fname)
+            if not os.path.exists(fpath):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"File not found: {fname}. Please re-upload."
+                )
+        
+        # Create job (starts processing in background)
+        job_id = job_queue.create_job(
+            files=files_list,
+            prompt=prompt,
+            session_id=session_id,
+            context_question=context_question,
+        )
+        
+        print(f"[JOB REUSE] {job_id} - Files: {files_list}, Prompt: {prompt[:50]}...")
+        
+        return {
+            "job_id": job_id,
+            "status": "pending",
+            "message": "Job submitted successfully.",
+            "uploaded_files": files_list,
         }
     
     except HTTPException:

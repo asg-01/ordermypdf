@@ -580,6 +580,10 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false); // true during upload, false during processing
   const [processingMessage, setProcessingMessage] = useState("");
   const currentJobIdRef = useRef(null);
+  
+  // Track uploaded files to avoid re-uploading
+  const [uploadedFileNames, setUploadedFileNames] = useState([]); // file names on server
+  const [lastUploadedFiles, setLastUploadedFiles] = useState([]); // File objects that were uploaded
 
   const statusPhrases = useMemo(
     () => [
@@ -885,11 +889,33 @@ export default function App() {
     };
   }, [loading]);
 
-  // Start pre-upload immediately when files are selected
+  // Check if current files match the last uploaded files
+  const canReuseFiles = useCallback(() => {
+    if (!uploadedFileNames.length || !lastUploadedFiles.length) return false;
+    if (files.length !== lastUploadedFiles.length) return false;
+    
+    // Check if all files match by name and size
+    return files.every((f, i) => 
+      lastUploadedFiles[i] && 
+      f.name === lastUploadedFiles[i].name && 
+      f.size === lastUploadedFiles[i].size
+    );
+  }, [files, uploadedFileNames, lastUploadedFiles]);
+
+  // Handle file selection
   const handleFileChange = (e) => {
     const selected = Array.from(e.target.files || []);
     setFiles(selected);
     setLastFileName(selected.length ? selected[selected.length - 1].name : "");
+
+    // Check if these are different files - reset uploaded state
+    const filesChanged = selected.length !== lastUploadedFiles.length ||
+      selected.some((f, i) => !lastUploadedFiles[i] || f.name !== lastUploadedFiles[i].name || f.size !== lastUploadedFiles[i].size);
+    
+    if (filesChanged) {
+      setUploadedFileNames([]);
+      setLastUploadedFiles([]);
+    }
 
     // Show warning for large files (50MB+)
     if (selected.length > 0) {
@@ -1021,7 +1047,12 @@ export default function App() {
     setPrompt("");
 
     // Simple status message
+    // Determine status message based on whether we can reuse files
+    const filesCanBeReused = canReuseFiles();
     const getStatusMessage = () => {
+      if (filesCanBeReused) {
+        return "Starting processing...";
+      }
       return isMobileDevice()
         ? "Uploading files... (Keep app open)"
         : "Uploading files...";
@@ -1050,10 +1081,48 @@ export default function App() {
       }
 
       let jobId;
+      let resultFileNames = [];
 
-      // Direct upload with progress tracking
-      console.log("[Submit] Uploading files...");
-      setIsUploading(true);
+      // Check if we can reuse already-uploaded files
+      if (filesCanBeReused && uploadedFileNames.length > 0) {
+        console.log("[Submit] Reusing uploaded files:", uploadedFileNames);
+        setIsUploading(false);
+        
+        const formData = new FormData();
+        formData.append("file_names", uploadedFileNames.join(","));
+        formData.append("prompt", userText);
+        if (pendingClarification?.question) {
+          formData.append("context_question", pendingClarification.question);
+        }
+        formData.append("session_id", sessionIdRef.current);
+
+        const response = await fetch("/submit-reuse", {
+          method: "POST",
+          body: formData,
+          signal: abortControllerRef.current.signal,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          // If files not found, fall back to normal upload
+          if (response.status === 404) {
+            console.log("[Submit] Files expired, re-uploading...");
+            setUploadedFileNames([]);
+            setLastUploadedFiles([]);
+          } else {
+            throw new Error(errorData.detail || `Server error (${response.status})`);
+          }
+        } else {
+          const result = await response.json();
+          jobId = result.job_id;
+          resultFileNames = result.uploaded_files || uploadedFileNames;
+        }
+      }
+      
+      // If no jobId yet, do normal upload
+      if (!jobId) {
+        console.log("[Submit] Uploading files...");
+        setIsUploading(true);
         
         const formData = new FormData();
         files.forEach((file) => formData.append("files", file));
@@ -1114,8 +1183,16 @@ export default function App() {
         });
 
         jobId = uploadResult.job_id;
+        resultFileNames = uploadResult.uploaded_files || [];
         setIsUploading(false);
         setUploadProgress(100);
+      }
+
+      // Store uploaded file names for reuse
+      if (resultFileNames.length > 0) {
+        setUploadedFileNames(resultFileNames);
+        setLastUploadedFiles([...files]);
+      }
 
       currentJobIdRef.current = jobId;
 
