@@ -40,20 +40,6 @@ import os
 import json
 from app.models import (
     ParsedIntent,
-    CompressIntent,
-    CompressToTargetIntent,
-    DocxConvertIntent,
-    DeleteIntent,
-    ExtractTextIntent,
-    MergeIntent,
-    OcrIntent,
-    PageNumbersIntent,
-    PdfToImagesIntent,
-    ReorderIntent,
-    RotateIntent,
-    SplitIntent,
-    SplitToFilesIntent,
-    WatermarkIntent,
 )
 from app.pdf_operations import get_upload_path
 
@@ -747,12 +733,12 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
         return ClarificationResult(
             intent=ParsedIntent(
                 operation_type="pdf_to_images",
-                pdf_to_images=PdfToImagesIntent(
-                    operation="pdf_to_images",
-                    file=file_name,
-                    format=prompt_compact,
-                    dpi=150,
-                ),
+                pdf_to_images={
+                    "operation": "pdf_to_images",
+                    "file": file_name,
+                    "format": prompt_compact,
+                    "dpi": 150,
+                },
             )
         )
 
@@ -761,7 +747,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
         return ClarificationResult(
             intent=ParsedIntent(
                 operation_type="pdf_to_docx",
-                pdf_to_docx=DocxConvertIntent(operation="pdf_to_docx", file=file_name),
+                pdf_to_docx={"operation": "pdf_to_docx", "file": file_name},
             )
         )
 
@@ -770,7 +756,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
         return ClarificationResult(
             intent=ParsedIntent(
                 operation_type="extract_text",
-                extract_text=ExtractTextIntent(operation="extract_text", file=file_name, pages=None),
+                extract_text={"operation": "extract_text", "file": file_name, "pages": None},
             )
         )
 
@@ -779,7 +765,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
         return ClarificationResult(
             intent=ParsedIntent(
                 operation_type="ocr",
-                ocr=OcrIntent(operation="ocr", file=file_name, language="eng", deskew=True),
+                ocr={"operation": "ocr", "file": file_name, "language": "eng", "deskew": True},
             )
         )
 
@@ -791,7 +777,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
             return ClarificationResult(
                 intent=ParsedIntent(
                     operation_type="merge",
-                    merge=MergeIntent(operation="merge", files=file_names),
+                    merge={"operation": "merge", "files": file_names},
                 )
             )
 
@@ -806,7 +792,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
             return ClarificationResult(
                 intent=ParsedIntent(
                     operation_type="delete",
-                    delete=DeleteIntent(operation="delete", file=file_names[0], pages_to_delete=pages),
+                    delete={"operation": "delete", "file": file_names[0], "pages_to_delete": pages},
                 )
             )
 
@@ -827,7 +813,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
             return ClarificationResult(
                 intent=ParsedIntent(
                     operation_type="reorder",
-                    reorder=ReorderIntent(operation="reorder", file=file_names[0], new_order=order),
+                    reorder={"operation": "reorder", "file": file_names[0], "new_order": order},
                 )
             )
 
@@ -843,7 +829,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
             return ClarificationResult(
                 intent=ParsedIntent(
                     operation_type="watermark",
-                    watermark=WatermarkIntent(operation="watermark", file=file_names[0], text=text),
+                    watermark={"operation": "watermark", "file": file_names[0], "text": text},
                 )
             )
 
@@ -852,7 +838,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
             return ClarificationResult(
                 intent=ParsedIntent(
                     operation_type="page_numbers",
-                    page_numbers=PageNumbersIntent(operation="page_numbers", file=file_names[0]),
+                    page_numbers={"operation": "page_numbers", "file": file_names[0]},
                 )
             )
 
@@ -862,7 +848,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
             return ClarificationResult(
                 intent=ParsedIntent(
                     operation_type="split_to_files",
-                    split_to_files=SplitToFilesIntent(operation="split_to_files", file=file_names[0], pages=(pages or None)),
+                    split_to_files={"operation": "split_to_files", "file": file_names[0], "pages": (pages or None)},
                 )
             )
 
@@ -921,11 +907,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
         file_name = file_names[0]
         compress_intent = ParsedIntent(
             operation_type="compress_to_target",
-            compress_to_target=CompressToTargetIntent(
-                operation="compress_to_target",
-                file=file_name,
-                target_mb=target_mb
-            )
+            compress_to_target={"operation": "compress_to_target", "file": file_name, "target_mb": target_mb},
         )
         return ClarificationResult(intent=compress_intent)
     
@@ -941,11 +923,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
             target_mb = max(1, int(size_mb * (percent / 100)))
             compress_intent = ParsedIntent(
                 operation_type="compress_to_target",
-                compress_to_target=CompressToTargetIntent(
-                    operation="compress_to_target",
-                    file=file_name,
-                    target_mb=target_mb
-                )
+                compress_to_target={"operation": "compress_to_target", "file": file_name, "target_mb": target_mb},
             )
             return ClarificationResult(intent=compress_intent)
     
@@ -956,11 +934,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
             return ClarificationResult(
                 intent=ParsedIntent(
                     operation_type="split_to_files",
-                    split_to_files=SplitToFilesIntent(
-                        operation="split_to_files",
-                        file=file_names[0],
-                        pages=None,
-                    ),
+                    split_to_files={"operation": "split_to_files", "file": file_names[0], "pages": None},
                 )
             )
 
@@ -970,11 +944,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
         file_name = file_names[0]
         split_intent = ParsedIntent(
             operation_type="split",
-            split=SplitIntent(
-                operation="split",
-                file=file_name,
-                pages=[1]
-            )
+            split={"operation": "split", "file": file_name, "pages": [1]},
         )
         return ClarificationResult(intent=split_intent)
     
@@ -985,11 +955,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
         file_name = file_names[0]
         split_intent = ParsedIntent(
             operation_type="split",
-            split=SplitIntent(
-                operation="split",
-                file=file_name,
-                pages=list(range(1, n + 1))
-            )
+            split={"operation": "split", "file": file_name, "pages": list(range(1, n + 1))},
         )
         return ClarificationResult(intent=split_intent)
 
@@ -1032,12 +998,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
 
         rotate_intent = ParsedIntent(
             operation_type="rotate",
-            rotate=RotateIntent(
-                operation="rotate",
-                file=file_name,
-                degrees=degrees,  # type: ignore[arg-type]
-                pages=None,
-            ),
+            rotate={"operation": "rotate", "file": file_name, "degrees": degrees, "pages": None},
         )
         return ClarificationResult(intent=rotate_intent)
 
@@ -1048,11 +1009,7 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
         file_name = file_names[0]
         compress_intent = ParsedIntent(
             operation_type="compress",
-            compress=CompressIntent(
-                operation="compress",
-                file=file_name,
-                preset=preset,
-            ),
+            compress={"operation": "compress", "file": file_name, "preset": preset},
         )
         return ClarificationResult(intent=compress_intent)
     
