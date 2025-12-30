@@ -6,31 +6,152 @@ function cn(...parts) {
 
 // Lightweight inline SVG icons (no external dependencies)
 const Icons = {
-  pdf: <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 2l5 5h-5V4zM9 13h2v5H9v-5zm4 0h2v5h-2v-5z"/></svg>,
-  bolt: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>,
-  robot: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2zM7.5 13a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm9 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM9 18h6v1H9v-1z"/></svg>,
-  shield: <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>,
-  copy: <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>,
-  spinner: <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>,
-  circle: <svg className="w-2 h-2" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>,
-  check: <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>,
-  folder: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>,
-  file: <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>,
-  play: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>,
-  download: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>,
-  clock: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z"/></svg>,
-  lightbulb: <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M9 21c0 .5.4 1 1 1h4c.6 0 1-.5 1-1v-1H9v1zm3-19C8.1 2 5 5.1 5 9c0 2.4 1.2 4.5 3 5.7V17c0 .5.4 1 1 1h6c.6 0 1-.5 1-1v-2.3c1.8-1.3 3-3.4 3-5.7 0-3.9-3.1-7-7-7z"/></svg>,
-  wand: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M7.5 5.6L10 7 8.6 4.5 10 2 7.5 3.4 5 2l1.4 2.5L5 7l2.5-1.4zm12 9.8L17 14l1.4 2.5L17 19l2.5-1.4L22 19l-1.4-2.5L22 14l-2.5 1.4zM22 2l-2.5 1.4L17 2l1.4 2.5L17 7l2.5-1.4L22 7l-1.4-2.5L22 2zM9.4 10.6L2 18l4 4 7.4-7.4-4-4zm-1.4 7L6.6 19 5 17.4l1.4-1.4 1.6 1.6z"/></svg>,
-  arrow: <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5v10z"/></svg>,
-  signal: <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M2 22h2V12H2v10zm4 0h2V9H6v13zm4 0h2V6h-2v16zm4 0h2V2h-2v20zm4 0h2v-8h-2v8z"/></svg>,
-  export: <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2v9.67z"/></svg>,
-  clipboard: <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M19 3h-4.18C14.4 1.84 13.3 1 12 1s-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 16H5V5h2v2h10V5h2v14z"/></svg>,
-  minus: <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg>,
-  error: <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>,
-  question: <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg>,
-  checkCircle: <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>,
-  upload: <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>,
-  cog: <svg className="w-4 h-4 animate-spin" fill="currentColor" viewBox="0 0 24 24"><path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66z"/></svg>,
+  pdf: (
+    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 2l5 5h-5V4zM9 13h2v5H9v-5zm4 0h2v5h-2v-5z" />
+    </svg>
+  ),
+  bolt: (
+    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
+    </svg>
+  ),
+  robot: (
+    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2zM7.5 13a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm9 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM9 18h6v1H9v-1z" />
+    </svg>
+  ),
+  shield: (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z" />
+    </svg>
+  ),
+  copy: (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
+    </svg>
+  ),
+  spinner: (
+    <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+      />
+    </svg>
+  ),
+  circle: (
+    <svg className="w-2 h-2" fill="currentColor" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="10" />
+    </svg>
+  ),
+  check: (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
+    </svg>
+  ),
+  folder: (
+    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" />
+    </svg>
+  ),
+  file: (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm4 18H6V4h7v5h5v11z" />
+    </svg>
+  ),
+  play: (
+    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  ),
+  download: (
+    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+    </svg>
+  ),
+  clock: (
+    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z" />
+    </svg>
+  ),
+  lightbulb: (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M9 21c0 .5.4 1 1 1h4c.6 0 1-.5 1-1v-1H9v1zm3-19C8.1 2 5 5.1 5 9c0 2.4 1.2 4.5 3 5.7V17c0 .5.4 1 1 1h6c.6 0 1-.5 1-1v-2.3c1.8-1.3 3-3.4 3-5.7 0-3.9-3.1-7-7-7z" />
+    </svg>
+  ),
+  wand: (
+    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M7.5 5.6L10 7 8.6 4.5 10 2 7.5 3.4 5 2l1.4 2.5L5 7l2.5-1.4zm12 9.8L17 14l1.4 2.5L17 19l2.5-1.4L22 19l-1.4-2.5L22 14l-2.5 1.4zM22 2l-2.5 1.4L17 2l1.4 2.5L17 7l2.5-1.4L22 7l-1.4-2.5L22 2zM9.4 10.6L2 18l4 4 7.4-7.4-4-4zm-1.4 7L6.6 19 5 17.4l1.4-1.4 1.6 1.6z" />
+    </svg>
+  ),
+  arrow: (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M10 17l5-5-5-5v10z" />
+    </svg>
+  ),
+  signal: (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M2 22h2V12H2v10zm4 0h2V9H6v13zm4 0h2V6h-2v16zm4 0h2V2h-2v20zm4 0h2v-8h-2v8z" />
+    </svg>
+  ),
+  export: (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2v9.67z" />
+    </svg>
+  ),
+  stop: (
+    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M6 6h12v12H6z" />
+    </svg>
+  ),
+  clipboard: (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M19 3h-4.18C14.4 1.84 13.3 1 12 1s-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 16H5V5h2v2h10V5h2v14z" />
+    </svg>
+  ),
+  minus: (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M19 13H5v-2h14v2z" />
+    </svg>
+  ),
+  error: (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
+    </svg>
+  ),
+  question: (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z" />
+    </svg>
+  ),
+  checkCircle: (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+    </svg>
+  ),
+  upload: (
+    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z" />
+    </svg>
+  ),
+  cog: (
+    <svg
+      className="w-4 h-4 animate-spin"
+      fill="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66z" />
+    </svg>
+  ),
 };
 
 function makeId() {
@@ -358,6 +479,7 @@ export default function App() {
   ]);
 
   const sessionIdRef = useRef(getOrCreateSessionId());
+  const abortControllerRef = useRef(null);
 
   const [toast, setToast] = useState(null);
   const [downloadBlink, setDownloadBlink] = useState(false);
@@ -432,6 +554,17 @@ export default function App() {
     const selected = Array.from(e.target.files || []);
     setFiles(selected);
     setLastFileName(selected.length ? selected[selected.length - 1].name : "");
+    
+    // Show warning immediately when large files are selected
+    if (selected.length > 0) {
+      const totalSizeMB = getTotalFileSizeMB(selected);
+      if (totalSizeMB > 60) {
+        showToast(
+          `⚠️ Large file (${Math.round(totalSizeMB)}MB) detected. Processing may take several minutes.`,
+          6000
+        );
+      }
+    }
   };
 
   // Show toast notification
@@ -441,6 +574,24 @@ export default function App() {
       setToast((t) => (t ? { ...t, exiting: true } : null));
       setTimeout(() => setToast(null), 300);
     }, duration);
+  };
+
+  // Stop/Cancel the current process
+  const stopProcess = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setLoading(false);
+      setEstimatedTime("");
+      showToast("⏹️ Process stopped by user.", 3000);
+      setMessages((prev) => [
+        ...prev.filter((m, idx) => {
+          if (idx !== prev.length - 1) return true;
+          return !(m.role === "agent" && m.tone === "status");
+        }),
+        { id: makeId(), role: "agent", tone: "neutral", text: "Process cancelled. Ready for your next request." },
+      ]);
+    }
   };
 
   const submit = async (overrideText) => {
@@ -530,18 +681,20 @@ export default function App() {
     formData.append("session_id", sessionIdRef.current);
 
     try {
-      const controller = new AbortController();
+      // Create abort controller for cancellation
+      abortControllerRef.current = new AbortController();
       // Large files (compression, OCR) can take several minutes - use 10 min timeout
       const timeoutMs = 10 * 60 * 1000; // 10 minutes
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      const timeoutId = setTimeout(() => abortControllerRef.current?.abort(), timeoutMs);
 
       const res = await fetch("/process", {
         method: "POST",
         body: formData,
-        signal: controller.signal,
+        signal: abortControllerRef.current.signal,
       });
 
       clearTimeout(timeoutId);
+      abortControllerRef.current = null;
 
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`);
@@ -650,7 +803,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
       <div className="cursor-glow" aria-hidden="true" />
-      
+
       {/* Toast notification for large files - centered on all devices */}
       {toast && (
         <div
@@ -685,8 +838,11 @@ export default function App() {
               </span>
             </h1>
             <p className="max-w-2xl text-sm leading-relaxed text-slate-300">
-              <span className="text-amber-400/80 mr-1 inline-block">{Icons.bolt}</span>
-              Merge, split, compress, OCR, convert (PDF ↔ DOCX/JPG/PNG) — just upload and describe.
+              <span className="text-amber-400/80 mr-1 inline-block">
+                {Icons.bolt}
+              </span>
+              Merge, split, compress, OCR, convert (PDF ↔ DOCX/JPG/PNG) — just
+              upload and describe.
             </p>
           </div>
         </header>
@@ -780,7 +936,9 @@ export default function App() {
                                   "active:scale-95 flex items-center gap-1.5"
                                 )}
                               >
-                                <span className="text-amber-300/80">{Icons.arrow}</span>
+                                <span className="text-amber-300/80">
+                                  {Icons.arrow}
+                                </span>
                                 {opt}
                               </button>
                             ))}
@@ -797,7 +955,9 @@ export default function App() {
                       <div className="flex items-center gap-3">
                         <span className="text-cyan-400">{Icons.cog}</span>
                         <div className="flex flex-col gap-1">
-                          <span className="font-medium">Processing your request...</span>
+                          <span className="font-medium">
+                            Processing your request...
+                          </span>
                           {estimatedTime && (
                             <span className="text-xs text-cyan-300/80 flex items-center gap-1">
                               {Icons.clock}
@@ -846,7 +1006,9 @@ export default function App() {
                         </span>
                         {files.length ? (
                           <span className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[11px] text-cyan-100 animate-chip-in">
-                            <span className="text-cyan-300">{Icons.checkCircle}</span>
+                            <span className="text-cyan-300">
+                              {Icons.checkCircle}
+                            </span>
                             <span className="truncate max-w-[14rem]">
                               {lastFileName || files[0]?.name}
                             </span>
@@ -868,41 +1030,45 @@ export default function App() {
                   </div>
 
                   <div className="hidden md:flex flex-col items-stretch gap-2 md:items-end">
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className={cn(
-                        "relative inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition",
-                        "border border-cyan-400/20 bg-cyan-400/10 text-cyan-50",
-                        "hover:bg-cyan-400/15",
-                        "focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60",
-                        loading && "cursor-not-allowed opacity-80"
-                      )}
-                    >
+                    {/* Desktop Run/Stop buttons */}
+                    <div className="flex gap-2">
                       {loading ? (
-                        <span className="inline-flex items-center gap-2">
-                          {Icons.spinner}
-                          Processing
-                        </span>
+                        <button
+                          type="button"
+                          onClick={stopProcess}
+                          className={cn(
+                            "relative inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition",
+                            "border border-rose-400/30 bg-rose-500/20 text-rose-100",
+                            "hover:bg-rose-500/30",
+                            "focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/60"
+                          )}
+                        >
+                          {Icons.stop}
+                          Stop
+                        </button>
                       ) : (
-                        <>
+                        <button
+                          type="submit"
+                          className={cn(
+                            "relative inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition",
+                            "border border-cyan-400/20 bg-cyan-400/10 text-cyan-50",
+                            "hover:bg-cyan-400/15",
+                            "focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
+                          )}
+                        >
                           {Icons.play}
                           Run
-                        </>
+                        </button>
                       )}
-                      {loading ? (
-                        <span
-                          className="absolute inset-0 rounded-xl shimmer"
-                          aria-hidden="true"
-                        />
-                      ) : null}
-                    </button>
+                    </div>
 
                     <div className="w-full md:w-[16rem]">
                       <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
                         <div className="mb-2 flex items-center justify-between">
                           <div className="text-[11px] font-medium text-slate-200 flex items-center gap-1">
-                            <span className="text-amber-300/80">{Icons.lightbulb}</span>
+                            <span className="text-amber-300/80">
+                              {Icons.lightbulb}
+                            </span>
                             Ideas
                           </div>
                           <div className="text-[10px] text-slate-400">
@@ -996,31 +1162,36 @@ export default function App() {
                   <div className="pointer-events-none absolute -inset-px rounded-2xl opacity-60 blur-sm" />
                 </div>
 
-                {/* Mobile buttons row - Run and Download side by side */}
+                {/* Mobile buttons row - Run/Stop and Download side by side */}
                 <div className="flex md:hidden gap-3">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className={cn(
-                      "flex-1 relative inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition",
-                      "border border-cyan-400/20 bg-cyan-400/10 text-cyan-50",
-                      "hover:bg-cyan-400/15",
-                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60",
-                      loading && "cursor-not-allowed opacity-80"
-                    )}
-                  >
-                    {loading ? (
-                      <span className="inline-flex items-center gap-2">
-                        {Icons.spinner}
-                        Processing
-                      </span>
-                    ) : (
-                      <>
-                        {Icons.play}
-                        Run
-                      </>
-                    )}
-                  </button>
+                  {loading ? (
+                    <button
+                      type="button"
+                      onClick={stopProcess}
+                      className={cn(
+                        "flex-1 relative inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition",
+                        "border border-rose-400/30 bg-rose-500/20 text-rose-100",
+                        "hover:bg-rose-500/30",
+                        "focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/60"
+                      )}
+                    >
+                      {Icons.stop}
+                      Stop
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      className={cn(
+                        "flex-1 relative inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition",
+                        "border border-cyan-400/20 bg-cyan-400/10 text-cyan-50",
+                        "hover:bg-cyan-400/15",
+                        "focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
+                      )}
+                    >
+                      {Icons.play}
+                      Run
+                    </button>
+                  )}
 
                   <a
                     href={
