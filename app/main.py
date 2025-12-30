@@ -45,6 +45,7 @@ from app.pdf_operations import (
 )
 from app.clarification_layer import clarify_intent
 from app.utils import normalize_whitespace, fuzzy_match_string, RE_EXPLICIT_ORDER, RE_ROTATE_DEGREES, RE_COMPRESS_SIZE
+from app.job_queue import job_queue, JobStatus
 
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -291,10 +292,15 @@ async def startup_event():
     print("[OK] OrderMyPDF started successfully")
     print(f"[OK] Using LLM model: {settings.llm_model}")
     
+    # Configure job queue processor
+    job_queue.set_processor(process_job_background)
+    print("[OK] Job queue system initialized")
+    
     # Start background scheduler for cleanup
     scheduler = BackgroundScheduler()
     scheduler.add_job(cleanup_old_files, 'interval', minutes=2)  # Run cleanup every 2 minutes
     scheduler.add_job(lambda: cleanup_old_sessions(30), 'interval', minutes=10)  # Purge idle sessions
+    scheduler.add_job(job_queue.cleanup_old_jobs, 'interval', minutes=5)  # Clean old jobs
     scheduler.start()
     print("[OK] Auto-cleanup scheduler started (files deleted after 10 minutes)")
 
@@ -648,6 +654,176 @@ def execute_operation_pipeline(intents: list[ParsedIntent], uploaded_files: list
 
 
 # ============================================
+# JOB QUEUE BACKGROUND PROCESSOR
+# ============================================
+
+def process_job_background(job_id: str):
+    """
+    Background job processor - runs the same logic as /process but with progress updates.
+    
+    This function is called by the job queue in a background thread.
+    """
+    job = job_queue.get_job(job_id)
+    if not job:
+        return
+    
+    try:
+        file_names = job.files
+        prompt = job.prompt
+        session_id = job.session_id
+        context_question = job.context_question
+        
+        job_queue.update_progress(job_id, 10, "Analyzing your request...")
+        
+        session = _get_session(session_id)
+        
+        # Detect 'compress by X%' BEFORE calling AI parser
+        print(f"[JOB {job_id}] Prompt: {prompt}")
+        print(f"[JOB {job_id}] Files: {file_names}")
+        
+        percent_match = re.search(r"compress( this)?( pdf)? by (\d{1,3})%", prompt, re.IGNORECASE)
+        if percent_match and file_names:
+            percent = int(percent_match.group(3))
+            file_name = file_names[0]
+            from app.models import ParsedIntent, CompressToTargetIntent
+            file_path = get_upload_path(file_name)
+            if os.path.exists(file_path):
+                size_bytes = os.path.getsize(file_path)
+                size_mb = size_bytes / (1024 * 1024)
+                target_mb = max(1, int(size_mb * (percent / 100)))
+                intent = ParsedIntent(
+                    operation_type="compress_to_target",
+                    compress_to_target=CompressToTargetIntent(
+                        operation="compress_to_target",
+                        file=file_name,
+                        target_mb=target_mb
+                    )
+                )
+                print(f"[JOB {job_id}] Auto-generated compress_to_target intent for {percent}%: {target_mb} MB")
+            else:
+                job_queue.fail_job(job_id, f"File not found for compression: {file_name}")
+                return
+        else:
+            # "do the same again" / "repeat" shortcut
+            if session and session.last_success_intent is not None:
+                if re.search(r"\b(same|again|repeat|do it again|do that again)\b", (prompt or ""), re.IGNORECASE):
+                    intent = session.last_success_intent
+                    _resolve_intent_filenames(intent, file_names)
+                    job_queue.update_progress(job_id, 30, "Repeating last operation...")
+                    try:
+                        if isinstance(intent, list):
+                            output_file, message = execute_operation_pipeline(intent, file_names)
+                            operation_name = "multi"
+                        else:
+                            output_file, message = execute_operation(intent)
+                            operation_name = intent.operation_type
+                    except Exception as e:
+                        job_queue.fail_job(job_id, str(e))
+                        return
+                    
+                    session.last_success_prompt = session.last_success_prompt or prompt
+                    session.last_success_intent = intent
+                    _clear_pending(session)
+                    job_queue.complete_job(job_id, "success", message, operation_name, output_file)
+                    return
+
+            # Use context question from request or session
+            effective_question = (context_question or "") or (session.pending_question if session else "") or ""
+
+            # Handle slot-filling for clarification flow
+            prompt_to_parse = prompt
+            if session and session.pending_question and session.pending_base_instruction:
+                normalized_reply = _normalize_ws(prompt)
+                normalized_options = {_normalize_ws(o) for o in (session.pending_options or [])}
+                if normalized_reply and normalized_reply in normalized_options:
+                    prompt_to_parse = prompt
+                else:
+                    if len(normalized_reply.split()) <= 6 or re.fullmatch(r"[0-9,\-\s]+", (prompt or "").strip()):
+                        prompt_to_parse = _build_prompt_from_reply(
+                            session.pending_base_instruction,
+                            session.pending_question,
+                            prompt,
+                        )
+
+            job_queue.update_progress(job_id, 20, "Understanding your request...")
+            
+            clarification_result = clarify_intent(prompt_to_parse, file_names, last_question=effective_question)
+            
+            if clarification_result.intent:
+                intent = clarification_result.intent
+                if isinstance(intent, list):
+                    print(f"[JOB {job_id}] Parsed multi-operation intent: {len(intent)} steps")
+                else:
+                    print(f"[JOB {job_id}] Parsed intent: {intent.operation_type}")
+                _clear_pending(session)
+            else:
+                print(f"[JOB {job_id}] Clarification needed: {clarification_result.clarification}")
+                if session:
+                    session.pending_question = clarification_result.clarification
+                    session.pending_options = clarification_result.options
+                    session.pending_base_instruction = prompt_to_parse
+                # Return clarification as a "completed" job with options
+                job_queue.complete_job(
+                    job_id,
+                    "error",
+                    clarification_result.clarification,
+                    options=clarification_result.options
+                )
+                return
+
+        # Fix common typos in filenames
+        _resolve_intent_filenames(intent, file_names)
+        
+        job_queue.update_progress(job_id, 40, "Processing your files...")
+        
+        # Execute the operation(s)
+        try:
+            if isinstance(intent, list):
+                total_steps = len(intent)
+                for i, _ in enumerate(intent):
+                    progress = 40 + int((i / total_steps) * 50)
+                    job_queue.update_progress(job_id, progress, f"Step {i+1} of {total_steps}...")
+                
+                output_file, message = execute_operation_pipeline(intent, file_names)
+                print(f"[JOB {job_id}] {message}")
+                operation_name = "multi"
+            else:
+                job_queue.update_progress(job_id, 60, f"Running {intent.operation_type}...")
+                output_file, message = execute_operation(intent)
+                print(f"[JOB {job_id}] {message}")
+                operation_name = intent.operation_type
+        except Exception as e:
+            job_queue.fail_job(job_id, str(e))
+            return
+
+        if session:
+            try:
+                session.last_success_prompt = prompt_to_parse
+            except Exception:
+                session.last_success_prompt = prompt
+            session.last_success_intent = intent
+        
+        job_queue.update_progress(job_id, 90, "Finalizing output...")
+        
+        # Delete uploaded files (keep output for download)
+        try:
+            for file_name in file_names:
+                upload_path = os.path.join("uploads", file_name)
+                if os.path.exists(upload_path):
+                    os.remove(upload_path)
+        except Exception as cleanup_err:
+            print(f"[JOB {job_id}] Warning: Failed to cleanup: {cleanup_err}")
+
+        job_queue.complete_job(job_id, "success", message, operation_name, output_file)
+        
+    except Exception as e:
+        print(f"[JOB {job_id}] Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        job_queue.fail_job(job_id, f"Unexpected error: {str(e)}")
+
+
+# ============================================
 # API ENDPOINTS
 # ============================================
 
@@ -658,8 +834,185 @@ async def root():
         "service": "OrderMyPDF",
         "status": "running",
         "version": "0.1.0",
-        "model": settings.llm_model
+        "model": settings.llm_model,
+        "job_queue": job_queue.get_stats()
     }
+
+
+# ============================================
+# JOB QUEUE ENDPOINTS (New async-friendly API)
+# ============================================
+
+@app.post("/submit")
+async def submit_job(
+    files: List[UploadFile] = File(..., description="PDF/image files to process"),
+    prompt: str = Form(..., description="Natural language instruction"),
+    context_question: str | None = Form(default=None),
+    session_id: str | None = Form(default=None),
+):
+    """
+    Submit a job for background processing.
+    
+    Returns immediately with a job_id. Use /job/{job_id}/status to poll progress.
+    
+    This is the recommended endpoint for large files or mobile devices.
+    """
+    try:
+        # Validate file count
+        if len(files) > settings.max_files_per_request:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Too many files. Maximum {settings.max_files_per_request} files allowed."
+            )
+        
+        # Save uploaded files
+        file_names = await save_uploaded_files(files)
+        
+        # Create job (starts processing in background)
+        job_id = job_queue.create_job(
+            files=file_names,
+            prompt=prompt,
+            session_id=session_id,
+            context_question=context_question,
+        )
+        
+        print(f"[JOB CREATED] {job_id} - Files: {file_names}, Prompt: {prompt[:50]}...")
+        
+        return {
+            "job_id": job_id,
+            "status": "pending",
+            "message": "Job submitted successfully. Poll /job/{job_id}/status for progress.",
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to submit job: {str(e)}")
+
+
+@app.get("/job/{job_id}/status")
+async def get_job_status(job_id: str):
+    """
+    Get the current status and progress of a job.
+    
+    Poll this endpoint every 2-3 seconds while status is "pending" or "processing".
+    
+    Returns:
+    - status: "pending" | "processing" | "completed" | "failed" | "cancelled"
+    - progress: 0-100
+    - message: Human-readable progress message
+    - result: (only when completed) Contains output_file, operation, etc.
+    """
+    job = job_queue.get_job(job_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    response = {
+        "job_id": job_id,
+        "status": job.status.value,
+        "progress": job.progress,
+        "message": job.progress_message,
+        "created_at": job.created_at,
+    }
+    
+    # Add timing info
+    if job.started_at:
+        response["started_at"] = job.started_at
+        response["elapsed_seconds"] = time.time() - job.started_at
+    
+    if job.completed_at:
+        response["completed_at"] = job.completed_at
+        if job.started_at:
+            response["processing_time_seconds"] = job.completed_at - job.started_at
+    
+    # Add result data when job is done
+    if job.status in (JobStatus.COMPLETED, JobStatus.FAILED):
+        response["result"] = {
+            "status": job.result_status,
+            "message": job.result_message,
+            "operation": job.result_operation,
+            "output_file": job.result_output_file,
+            "options": job.result_options,
+        }
+    
+    return response
+
+
+@app.post("/job/{job_id}/cancel")
+async def cancel_job(job_id: str):
+    """Cancel a pending job."""
+    job = job_queue.get_job(job_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job.status == JobStatus.PROCESSING:
+        return {
+            "success": False,
+            "message": "Cannot cancel a job that is already processing. Please wait for it to complete."
+        }
+    
+    if job.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
+        return {
+            "success": False,
+            "message": f"Job is already {job.status.value}."
+        }
+    
+    success = job_queue.cancel_job(job_id)
+    return {
+        "success": success,
+        "message": "Job cancelled." if success else "Could not cancel job."
+    }
+
+
+@app.get("/job/{job_id}/result")
+async def get_job_result(job_id: str):
+    """
+    Download the result file for a completed job.
+    
+    Only available after job status is "completed".
+    """
+    job = job_queue.get_job(job_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job.status != JobStatus.COMPLETED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job is not completed. Current status: {job.status.value}"
+        )
+    
+    if not job.result_output_file:
+        raise HTTPException(status_code=404, detail="No output file available")
+    
+    file_path = get_output_path(job.result_output_file)
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Output file not found on server")
+    
+    # Determine content type
+    filename = job.result_output_file
+    lower = filename.lower()
+    media_type = "application/pdf"
+    if lower.endswith(".docx"):
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    elif lower.endswith(".zip"):
+        media_type = "application/zip"
+    elif lower.endswith(".txt"):
+        media_type = "text/plain"
+
+    return FileResponse(
+        file_path,
+        media_type=media_type,
+        filename=filename
+    )
+
+
+# ============================================
+# LEGACY SYNCHRONOUS ENDPOINT (kept for backwards compatibility)
+# ============================================
 
 
 @app.post("/process", response_model=ProcessResponse)

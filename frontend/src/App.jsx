@@ -485,6 +485,9 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [downloadBlink, setDownloadBlink] = useState(false);
   const [estimatedTime, setEstimatedTime] = useState("");
+  const [jobProgress, setJobProgress] = useState(0);
+  const [jobMessage, setJobMessage] = useState("");
+  const currentJobIdRef = useRef(null);
 
   const statusPhrases = useMemo(
     () => [
@@ -641,21 +644,35 @@ export default function App() {
   };
 
   // Stop/Cancel the current process
-  const stopProcess = () => {
+  const stopProcess = async () => {
+    // Cancel the polling abort controller
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
-      setLoading(false);
-      setEstimatedTime("");
-      showToast("⏹️ Process stopped by user.", 3000);
-      setMessages((prev) => [
-        ...prev.filter((m, idx) => {
-          if (idx !== prev.length - 1) return true;
-          return !(m.role === "agent" && m.tone === "status");
-        }),
-        { id: makeId(), role: "agent", tone: "neutral", text: "Process cancelled. Ready for your next request." },
-      ]);
     }
+    
+    // Try to cancel the job on the server
+    if (currentJobIdRef.current) {
+      try {
+        await fetch(`/job/${currentJobIdRef.current}/cancel`, { method: "POST" });
+      } catch (e) {
+        // Ignore cancel errors
+      }
+      currentJobIdRef.current = null;
+    }
+    
+    setLoading(false);
+    setEstimatedTime("");
+    setJobProgress(0);
+    setJobMessage("");
+    showToast("⏹️ Process stopped by user.", 3000);
+    setMessages((prev) => [
+      ...prev.filter((m, idx) => {
+        if (idx !== prev.length - 1) return true;
+        return !(m.role === "agent" && m.tone === "status");
+      }),
+      { id: makeId(), role: "agent", tone: "neutral", text: "Process cancelled. Ready for your next request." },
+    ]);
   };
 
   const submit = async (overrideText) => {
@@ -689,6 +706,8 @@ export default function App() {
     setResult(null);
     setClarification("");
     setDownloadBlink(false);
+    setJobProgress(0);
+    setJobMessage("Uploading files...");
 
     const rawUserText = rawInput;
 
@@ -733,7 +752,7 @@ export default function App() {
         // Show what user typed, but actually send the clarified prompt.
         text: pendingClarification ? rawUserText : userText,
       },
-      { id: makeId(), role: "agent", tone: "status", text: statusPhrases[0] },
+      { id: makeId(), role: "agent", tone: "status", text: "Uploading files..." },
     ]);
 
     const formData = new FormData();
@@ -745,90 +764,28 @@ export default function App() {
     formData.append("session_id", sessionIdRef.current);
 
     try {
-      // Create abort controller for cancellation
+      // Create abort controller for upload and polling
       abortControllerRef.current = new AbortController();
-      // Large files (compression, OCR) can take several minutes - use 10 min timeout
-      const timeoutMs = 10 * 60 * 1000; // 10 minutes
-      const timeoutId = setTimeout(() => abortControllerRef.current?.abort(), timeoutMs);
 
-      const res = await fetch("/process", {
+      // Step 1: Submit job (fast - just uploads files)
+      const submitRes = await fetch("/submit", {
         method: "POST",
         body: formData,
         signal: abortControllerRef.current.signal,
       });
 
-      clearTimeout(timeoutId);
-      abortControllerRef.current = null;
-
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
+      if (!submitRes.ok) {
+        throw new Error(`Upload failed: ${submitRes.status}`);
       }
 
-      const data = await res.json();
+      const submitData = await submitRes.json();
+      const jobId = submitData.job_id;
+      currentJobIdRef.current = jobId;
 
-      // Remove the last status bubble and replace it with the final response
-      setMessages((prev) => {
-        const trimmed = prev.filter((m, idx) => {
-          // keep everything except the last agent status bubble we appended
-          if (idx !== prev.length - 1) return true;
-          return !(m.role === "agent" && m.tone === "status");
-        });
-        return trimmed;
-      });
+      setJobProgress(10);
+      setJobMessage("Processing started...");
 
-      if (data.status === "success") {
-        setResult(data);
-        setPendingClarification(null);
-        setClarification("");
-        setEstimatedTime("");
-        // Trigger download button blink
-        setDownloadBlink(true);
-        setTimeout(() => setDownloadBlink(false), 1600);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: makeId(),
-            role: "agent",
-            tone: "success",
-            text: data.message || "Done.",
-          },
-        ]);
-      } else {
-        const msg = data.message || "Unknown error";
-        const hasOptions = isNonEmptyArray(data.options);
-        if (hasOptions || looksLikeClarification(msg)) {
-          setClarification(msg);
-          setPendingClarification({ question: msg, baseInstruction: userText });
-          // When agent asks, clear the input so user can type the answer.
-          setPrompt("");
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: makeId(),
-              role: "agent",
-              tone: "clarify",
-              text: msg,
-              options: data.options,
-            },
-          ]);
-          // Keep focus in the input so it feels like a chat
-          setTimeout(() => promptRef.current?.focus(), 0);
-        } else {
-          setError(msg);
-          setPendingClarification(null);
-          setMessages((prev) => [
-            ...prev,
-            { id: makeId(), role: "agent", tone: "error", text: msg },
-          ]);
-        }
-      }
-    } catch (err) {
-      setEstimatedTime("");
-      const msg =
-        err?.name === "AbortError"
-          ? "Request timed out. Please try again."
-          : `Failed to connect to backend: ${err?.message || err}`;
-      setError(msg);
+      // Update status message
       setMessages((prev) => {
         const trimmed = prev.filter((m, idx) => {
           if (idx !== prev.length - 1) return true;
@@ -836,11 +793,161 @@ export default function App() {
         });
         return [
           ...trimmed,
-          { id: makeId(), role: "agent", tone: "error", text: msg },
+          { id: makeId(), role: "agent", tone: "status", text: "Processing your request..." },
         ];
       });
+
+      // Step 2: Poll for status until done
+      let completed = false;
+      let pollCount = 0;
+      const maxPolls = 600; // 10 minutes at 1 second intervals
+
+      while (!completed && pollCount < maxPolls) {
+        // Check if cancelled
+        if (abortControllerRef.current?.signal.aborted) {
+          throw new DOMException("Cancelled", "AbortError");
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 1500)); // Poll every 1.5 seconds
+        pollCount++;
+
+        const statusRes = await fetch(`/job/${jobId}/status`, {
+          signal: abortControllerRef.current?.signal,
+        });
+
+        if (!statusRes.ok) {
+          throw new Error(`Status check failed: ${statusRes.status}`);
+        }
+
+        const statusData = await statusRes.json();
+        
+        // Update progress in UI
+        setJobProgress(statusData.progress || 0);
+        setJobMessage(statusData.message || "Processing...");
+
+        // Update the status bubble with real progress
+        setMessages((prev) => {
+          const trimmed = prev.filter((m, idx) => {
+            if (idx !== prev.length - 1) return true;
+            return !(m.role === "agent" && m.tone === "status");
+          });
+          return [
+            ...trimmed,
+            { 
+              id: makeId(), 
+              role: "agent", 
+              tone: "status", 
+              text: `${statusData.message || "Processing..."} (${statusData.progress || 0}%)` 
+            },
+          ];
+        });
+
+        if (statusData.status === "completed" || statusData.status === "failed") {
+          completed = true;
+          currentJobIdRef.current = null;
+          
+          // Remove the status bubble
+          setMessages((prev) => {
+            const trimmed = prev.filter((m, idx) => {
+              if (idx !== prev.length - 1) return true;
+              return !(m.role === "agent" && m.tone === "status");
+            });
+            return trimmed;
+          });
+
+          const resultData = statusData.result;
+
+          if (resultData?.status === "success") {
+            setResult({
+              status: "success",
+              output_file: resultData.output_file,
+              message: resultData.message,
+              operation: resultData.operation,
+            });
+            setPendingClarification(null);
+            setClarification("");
+            setEstimatedTime("");
+            setJobProgress(100);
+            setJobMessage("Complete!");
+            // Trigger download button blink
+            setDownloadBlink(true);
+            setTimeout(() => setDownloadBlink(false), 1600);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: makeId(),
+                role: "agent",
+                tone: "success",
+                text: resultData.message || "Done!",
+              },
+            ]);
+          } else {
+            // Handle error or clarification
+            const msg = resultData?.message || "Unknown error";
+            const hasOptions = isNonEmptyArray(resultData?.options);
+            
+            if (hasOptions || looksLikeClarification(msg)) {
+              setClarification(msg);
+              setPendingClarification({ question: msg, baseInstruction: userText });
+              setPrompt("");
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: makeId(),
+                  role: "agent",
+                  tone: "clarify",
+                  text: msg,
+                  options: resultData?.options,
+                },
+              ]);
+              setTimeout(() => promptRef.current?.focus(), 0);
+            } else {
+              setError(msg);
+              setPendingClarification(null);
+              setMessages((prev) => [
+                ...prev,
+                { id: makeId(), role: "agent", tone: "error", text: msg },
+              ]);
+            }
+          }
+        } else if (statusData.status === "cancelled") {
+          completed = true;
+          currentJobIdRef.current = null;
+          // Already handled by stopProcess
+        }
+      }
+
+      if (!completed) {
+        throw new Error("Processing timed out. Please try again with a smaller file.");
+      }
+
+    } catch (err) {
+      currentJobIdRef.current = null;
+      setEstimatedTime("");
+      setJobProgress(0);
+      setJobMessage("");
+      
+      const msg =
+        err?.name === "AbortError"
+          ? "Request cancelled."
+          : `Failed: ${err?.message || err}`;
+      
+      if (err?.name !== "AbortError") {
+        setError(msg);
+        setMessages((prev) => {
+          const trimmed = prev.filter((m, idx) => {
+            if (idx !== prev.length - 1) return true;
+            return !(m.role === "agent" && m.tone === "status");
+          });
+          return [
+            ...trimmed,
+            { id: makeId(), role: "agent", tone: "error", text: msg },
+          ];
+        });
+      }
     } finally {
       setLoading(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -1016,18 +1123,30 @@ export default function App() {
                 {loading ? (
                   <div className="flex w-full justify-start animate-fade-slide">
                     <div className="max-w-[92%] rounded-2xl border border-cyan-400/15 bg-white/5 px-4 py-3 text-sm text-slate-200">
-                      <div className="flex items-center gap-3">
-                        <span className="text-cyan-400">{Icons.cog}</span>
-                        <div className="flex flex-col gap-1">
-                          <span className="font-medium">
-                            Processing your request...
-                          </span>
-                          {estimatedTime && (
-                            <span className="text-xs text-cyan-300/80 flex items-center gap-1">
-                              {Icons.clock}
-                              Estimated wait: {estimatedTime}
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-3">
+                          <span className="text-cyan-400">{Icons.cog}</span>
+                          <div className="flex flex-col gap-1">
+                            <span className="font-medium">
+                              {jobMessage || "Processing your request..."}
                             </span>
-                          )}
+                            {estimatedTime && !jobProgress && (
+                              <span className="text-xs text-cyan-300/80 flex items-center gap-1">
+                                {Icons.clock}
+                                Estimated wait: {estimatedTime}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {/* Progress bar */}
+                        <div className="w-full bg-slate-700/50 rounded-full h-2 overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-cyan-500 to-teal-400 rounded-full transition-all duration-500 ease-out"
+                            style={{ width: `${jobProgress}%` }}
+                          />
+                        </div>
+                        <div className="text-xs text-cyan-300/70 text-right">
+                          {jobProgress}% complete
                         </div>
                       </div>
                     </div>
@@ -1386,15 +1505,26 @@ export default function App() {
                     )}
                   </div>
                 </div>
-                {loading && estimatedTime && (
+                {loading && (
                   <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/10 px-3 py-2">
-                    <div className="text-[11px] text-cyan-300 flex items-center gap-1">
+                    <div className="text-[11px] text-cyan-300 flex items-center gap-1 mb-1">
                       {Icons.clock}
-                      Est. Wait
+                      Progress
                     </div>
-                    <div className="text-cyan-100 font-medium">
-                      {estimatedTime}
+                    <div className="text-cyan-100 font-medium text-sm mb-1">
+                      {jobProgress}%
                     </div>
+                    <div className="w-full bg-slate-700/50 rounded-full h-1.5 overflow-hidden">
+                      <div 
+                        className="h-full bg-cyan-400 rounded-full transition-all duration-300"
+                        style={{ width: `${jobProgress}%` }}
+                      />
+                    </div>
+                    {estimatedTime && jobProgress < 20 && (
+                      <div className="text-[10px] text-cyan-300/70 mt-1">
+                        Est: {estimatedTime}
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">
