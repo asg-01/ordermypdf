@@ -653,9 +653,11 @@ export default function App() {
   const [statusIndex, setStatusIndex] = useState(0);
   const [recoveredJob, setRecoveredJob] = useState(null);
 
-  // Fetch RAM stats on mount and periodically when idle
+  // Fetch RAM stats on mount and periodically
   useEffect(() => {
     let interval = null;
+    let retryCount = 0;
+    const maxRetries = 3;
 
     const fetchRam = async () => {
       try {
@@ -663,27 +665,41 @@ export default function App() {
         if (res.ok) {
           const data = await res.json();
           console.log("[RAM] Fetched:", data);
-          setRamStats(data);
+          // Only set if we got useful data
+          if (data && (data.rss_mb || data.peak_rss_mb || data.level)) {
+            setRamStats(data);
+            retryCount = 0; // Reset retry count on success
+          } else {
+            console.warn("[RAM] Got empty/incomplete data:", data);
+            // Retry a few times on initial load
+            if (retryCount < maxRetries) {
+              retryCount++;
+              setTimeout(fetchRam, 2000);
+            }
+          }
+        } else {
+          console.warn("[RAM] Non-OK response:", res.status);
         }
       } catch (e) {
         console.warn("[RAM] Failed to fetch:", e);
+        // Retry on error during initial load
+        if (retryCount < maxRetries) {
+          retryCount++;
+          setTimeout(fetchRam, 2000);
+        }
       }
     };
 
-    // Initial fetch
-    fetchRam();
+    // Initial fetch with slight delay to let backend warm up
+    setTimeout(fetchRam, 500);
 
-    // Poll every 10 seconds when NOT loading (idle state)
-    interval = setInterval(() => {
-      if (!loading) {
-        fetchRam();
-      }
-    }, 10000);
+    // Poll every 15 seconds (always, not just when idle)
+    interval = setInterval(fetchRam, 15000);
 
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [loading]);
+  }, []); // Remove loading dependency so it always polls
 
   // Check for pending job on mount (recovery after page refresh)
   useEffect(() => {
@@ -1581,9 +1597,9 @@ export default function App() {
   }, [ramStats]);
 
   const ramPillText = useMemo(() => {
-    if (!ramStats) return null;
+    if (!ramStats) return "Loading...";
     const mb = ramStats.rss_mb || ramStats.peak_rss_mb || null;
-    if (mb == null) return null;
+    if (mb == null) return "—";
     console.log("[RAM] Pill showing:", mb);
     return `RAM ${mb}MB`;
   }, [ramStats]);
@@ -1679,20 +1695,18 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Live RAM indicator (mobile). No ETA here; chat already shows it. */}
-              {loading &&
-              ramStats &&
-              (ramStats.rss_mb || ramStats.peak_rss_mb) ? (
-                <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-300">
-                  <span className={cn(ramIndicator.className)}>
-                    {Icons.circle}
-                  </span>
-                  <span className="text-slate-200">RAM</span>
-                  <span className="text-slate-400">
-                    {ramStats.rss_mb || ramStats.peak_rss_mb}MB
-                  </span>
-                </div>
-              ) : null}
+              {/* Live RAM indicator (mobile) - always visible */}
+              <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-300">
+                <span className={cn(ramIndicator.className)}>
+                  {Icons.circle}
+                </span>
+                <span className="text-slate-200">RAM</span>
+                <span className="text-slate-400">
+                  {ramStats
+                    ? `${ramStats.rss_mb || ramStats.peak_rss_mb || "—"}MB`
+                    : "Loading..."}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -1714,14 +1728,13 @@ export default function App() {
                   {fileBadge}
                 </span>
 
-                {loading && ramPillText ? (
-                  <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] text-slate-300 flex items-center gap-1.5">
-                    <span className={cn(ramIndicator.className)}>
-                      {Icons.circle}
-                    </span>
-                    <span className="text-slate-200">{ramPillText}</span>
+                {/* RAM pill - always visible */}
+                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] text-slate-300 flex items-center gap-1.5">
+                  <span className={cn(ramIndicator.className)}>
+                    {Icons.circle}
                   </span>
-                ) : null}
+                  <span className="text-slate-200">{ramPillText}</span>
+                </span>
 
                 <span
                   className={cn(
@@ -2215,7 +2228,7 @@ export default function App() {
                     <span className="text-slate-400">
                       {ramStats
                         ? `${ramStats.rss_mb || ramStats.peak_rss_mb || "—"}MB`
-                        : "—"}
+                        : "Loading..."}
                     </span>
                   </div>
                 </div>

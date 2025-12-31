@@ -35,6 +35,14 @@ export default defineConfig({
         target: API_URL,
         changeOrigin: true,
       },
+      "/api": {
+        target: API_URL,
+        changeOrigin: true,
+      },
+      "/preupload": {
+        target: API_URL,
+        changeOrigin: true,
+      },
     },
   },
 });
