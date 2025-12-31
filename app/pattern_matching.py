@@ -230,6 +230,23 @@ class PatternMatcher:
         # Strip noise prefixes
         result = NOISE_PATTERN.sub("", result).strip()
         
+        # Fix common typos BEFORE other processing
+        typo_fixes = {
+            r"\bdog\b": "docx",
+            r"\bdox\b": "docx",
+            r"\bspill\b": "split",
+            r"\bspilt\b": "split",
+            r"\bpfd\b": "pdf",
+            r"\bimag\b": "image",
+            r"\bcompres\b": "compress",
+            r"\bmrge\b": "merge",
+            r"\bmerg\b": "merge",
+            r"\brotat\b": "rotate",
+            r"\brotae\b": "rotate",
+        }
+        for typo, fix in typo_fixes.items():
+            result = re.sub(typo, fix, result, flags=re.IGNORECASE)
+        
         # Normalize arrows
         result = ARROW_PATTERN.sub(" → ", result)
         

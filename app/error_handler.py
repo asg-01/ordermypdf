@@ -106,8 +106,19 @@ class ErrorClassifier:
         "compres": "compress",
         "cnvert": "convert",
         "spllit": "split",
+        "spilt": "split",
+        "spill": "split",
         "to doc": "to docx",
+        "to dog": "to docx",
+        "to dox": "to docx",
         "to img": "to image",
+        "to imag": "to image",
+        "to pdf": "to pdf",
+        "to pfd": "to pdf",
+        "merg": "merge",
+        "mrge": "merge",
+        "rotat": "rotate",
+        "rotae": "rotate",
     }
     
     # Layer 1: Shorthand expansions

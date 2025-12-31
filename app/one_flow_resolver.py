@@ -201,8 +201,12 @@ class LocalNormalizer:
             r"\bmrge\b": "merge",
             r"\bmerg\b": "merge",
             r"\bsplt\b": "split",
+            r"\bspill\b": "split",
+            r"\bspilt\b": "split",
             r"\bconvrt\b": "convert",
             r"\brotate\b": "rotate",
+            r"\brotat\b": "rotate",
+            r"\brotae\b": "rotate",
             r"\bwatermark\b": "watermark",
             r"\benhance\b": "enhance",
             r"\breorder\b": "reorder",
@@ -211,6 +215,10 @@ class LocalNormalizer:
             r"\badn\b": "and",
             r"\bthn\b": "then",
             r"\bthne\b": "then",
+            r"\bdog\b": "docx",
+            r"\bdox\b": "docx",
+            r"\bpfd\b": "pdf",
+            r"\bimag\b": "image",
         }
         
         for typo, fix in typo_fixes.items():
