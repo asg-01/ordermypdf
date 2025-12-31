@@ -1109,6 +1109,480 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
                             ),
                         ]
                     )
+            
+            # PDF + merge + OCR → Merge → OCR
+            if wants_merge and wants_ocr and all_pdfs and num_files >= 2:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="merge",
+                            merge={"operation": "merge", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                    ]
+                )
+            
+            # PDF + merge + enhance → Merge → Enhance
+            if wants_merge and wants_enhance and all_pdfs and num_files >= 2:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="merge",
+                            merge={"operation": "merge", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="enhance_scan",
+                            enhance_scan={"operation": "enhance_scan", "file": primary},
+                        ),
+                    ]
+                )
+            
+            # PDF + merge + flatten → Merge → Flatten
+            if wants_merge and wants_flatten and all_pdfs and num_files >= 2:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="merge",
+                            merge={"operation": "merge", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                    ]
+                )
+            
+            # PDF + merge + page numbers → Merge → Page Numbers
+            if wants_merge and wants_page_numbers and all_pdfs and num_files >= 2:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="merge",
+                            merge={"operation": "merge", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="page_numbers",
+                            page_numbers={"operation": "page_numbers", "file": primary},
+                        ),
+                    ]
+                )
+            
+            # PDF + merge + rotate → Merge → Rotate
+            if wants_merge and wants_rotate and all_pdfs and num_files >= 2:
+                degrees = 90
+                if re.search(r"\b(left|counter|anti)\b", prompt_compact):
+                    degrees = 270
+                elif re.search(r"\b180\b", prompt_compact):
+                    degrees = 180
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="merge",
+                            merge={"operation": "merge", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="rotate",
+                            rotate={"operation": "rotate", "file": primary, "degrees": degrees, "pages": None},
+                        ),
+                    ]
+                )
+            
+            # PDF + merge + clean → Merge → Clean
+            if wants_merge and wants_clean and all_pdfs and num_files >= 2:
+                is_duplicate = bool(re.search(r"\bduplicate\b", prompt_compact))
+                op_type = "remove_duplicate_pages" if is_duplicate else "remove_blank_pages"
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="merge",
+                            merge={"operation": "merge", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type=op_type,
+                            **{op_type: {"operation": op_type, "file": primary}},
+                        ),
+                    ]
+                )
+            
+            # PDF + OCR + flatten → OCR → Flatten
+            if wants_ocr and wants_flatten and is_pdf_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                    ]
+                )
+            
+            # PDF + OCR + page numbers → OCR → Page Numbers
+            if wants_ocr and wants_page_numbers and is_pdf_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="page_numbers",
+                            page_numbers={"operation": "page_numbers", "file": primary},
+                        ),
+                    ]
+                )
+            
+            # PDF + OCR + clean → OCR → Clean
+            if wants_ocr and wants_clean and is_pdf_file:
+                is_duplicate = bool(re.search(r"\bduplicate\b", prompt_compact))
+                op_type = "remove_duplicate_pages" if is_duplicate else "remove_blank_pages"
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type=op_type,
+                            **{op_type: {"operation": op_type, "file": primary}},
+                        ),
+                    ]
+                )
+            
+            # PDF + OCR + rotate → OCR → Rotate
+            if wants_ocr and wants_rotate and is_pdf_file:
+                degrees = 90
+                if re.search(r"\b(left|counter|anti)\b", prompt_compact):
+                    degrees = 270
+                elif re.search(r"\b180\b", prompt_compact):
+                    degrees = 180
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="rotate",
+                            rotate={"operation": "rotate", "file": primary, "degrees": degrees, "pages": None},
+                        ),
+                    ]
+                )
+            
+            # PDF + clean + reorder → Clean → Reorder
+            if wants_clean and wants_reorder and is_pdf_file:
+                is_duplicate = bool(re.search(r"\bduplicate\b", prompt_compact))
+                op_type = "remove_duplicate_pages" if is_duplicate else "remove_blank_pages"
+                is_reverse = bool(re.search(r"\breverse\b", prompt_compact))
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type=op_type,
+                            **{op_type: {"operation": op_type, "file": primary}},
+                        ),
+                        ParsedIntent(
+                            operation_type="reorder",
+                            reorder={"operation": "reorder", "file": primary, "new_order": "reverse" if is_reverse else None},
+                        ),
+                    ]
+                )
+            
+            # PDF + clean + flatten → Clean → Flatten
+            if wants_clean and wants_flatten and is_pdf_file:
+                is_duplicate = bool(re.search(r"\bduplicate\b", prompt_compact))
+                op_type = "remove_duplicate_pages" if is_duplicate else "remove_blank_pages"
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type=op_type,
+                            **{op_type: {"operation": op_type, "file": primary}},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                    ]
+                )
+            
+            # PDF + page numbers + flatten → Page Numbers → Flatten
+            if wants_page_numbers and wants_flatten and is_pdf_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="page_numbers",
+                            page_numbers={"operation": "page_numbers", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                    ]
+                )
+            
+            # PDF + watermark + flatten → Watermark → Flatten
+            if wants_watermark and wants_flatten and is_pdf_file:
+                m = re.search(r"\bwatermark\b(?:\s+(?:with|text|as))?\s+(\S+)", user_prompt, re.IGNORECASE)
+                text = (m.group(1).strip() if m else "").strip("\"'")
+                if text:
+                    return ClarificationResult(
+                        intent=[
+                            ParsedIntent(
+                                operation_type="watermark",
+                                watermark={"operation": "watermark", "file": primary, "text": text},
+                            ),
+                            ParsedIntent(
+                                operation_type="flatten_pdf",
+                                flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                            ),
+                        ]
+                    )
+            
+            # PDF + rotate + reorder → Rotate → Reorder
+            if wants_rotate and wants_reorder and is_pdf_file:
+                degrees = 90
+                if re.search(r"\b(left|counter|anti)\b", prompt_compact):
+                    degrees = 270
+                elif re.search(r"\b180\b", prompt_compact):
+                    degrees = 180
+                is_reverse = bool(re.search(r"\breverse\b", prompt_compact))
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="rotate",
+                            rotate={"operation": "rotate", "file": primary, "degrees": degrees, "pages": None},
+                        ),
+                        ParsedIntent(
+                            operation_type="reorder",
+                            reorder={"operation": "reorder", "file": primary, "new_order": "reverse" if is_reverse else None},
+                        ),
+                    ]
+                )
+            
+            # ========== 3-STEP PDF PIPELINES ==========
+            
+            # PDF + enhance + OCR + compress → Enhance → OCR → Compress
+            if wants_enhance and wants_ocr and wants_compress and is_pdf_file:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="enhance_scan",
+                            enhance_scan={"operation": "enhance_scan", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # PDF + clean + OCR + compress → Clean → OCR → Compress
+            if wants_clean and wants_ocr and wants_compress and is_pdf_file:
+                is_duplicate = bool(re.search(r"\bduplicate\b", prompt_compact))
+                op_type = "remove_duplicate_pages" if is_duplicate else "remove_blank_pages"
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type=op_type,
+                            **{op_type: {"operation": op_type, "file": primary}},
+                        ),
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # PDF + merge + clean + compress → Merge → Clean → Compress
+            if wants_merge and wants_clean and wants_compress and all_pdfs and num_files >= 2:
+                is_duplicate = bool(re.search(r"\bduplicate\b", prompt_compact))
+                op_type = "remove_duplicate_pages" if is_duplicate else "remove_blank_pages"
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="merge",
+                            merge={"operation": "merge", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type=op_type,
+                            **{op_type: {"operation": op_type, "file": primary}},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # PDF + merge + rotate + compress → Merge → Rotate → Compress
+            if wants_merge and wants_rotate and wants_compress and all_pdfs and num_files >= 2:
+                degrees = 90
+                if re.search(r"\b(left|counter|anti)\b", prompt_compact):
+                    degrees = 270
+                elif re.search(r"\b180\b", prompt_compact):
+                    degrees = 180
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="merge",
+                            merge={"operation": "merge", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="rotate",
+                            rotate={"operation": "rotate", "file": primary, "degrees": degrees, "pages": None},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # PDF + merge + OCR + compress → Merge → OCR → Compress
+            if wants_merge and wants_ocr and wants_compress and all_pdfs and num_files >= 2:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="merge",
+                            merge={"operation": "merge", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # PDF + OCR + page numbers + compress → OCR → Page Numbers → Compress
+            if wants_ocr and wants_page_numbers and wants_compress and is_pdf_file:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="page_numbers",
+                            page_numbers={"operation": "page_numbers", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # PDF + rotate + page numbers + compress → Rotate → Page Numbers → Compress
+            if wants_rotate and wants_page_numbers and wants_compress and is_pdf_file:
+                degrees = 90
+                if re.search(r"\b(left|counter|anti)\b", prompt_compact):
+                    degrees = 270
+                elif re.search(r"\b180\b", prompt_compact):
+                    degrees = 180
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="rotate",
+                            rotate={"operation": "rotate", "file": primary, "degrees": degrees, "pages": None},
+                        ),
+                        ParsedIntent(
+                            operation_type="page_numbers",
+                            page_numbers={"operation": "page_numbers", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # PDF + merge + watermark + compress → Merge → Watermark → Compress
+            if wants_merge and wants_watermark and wants_compress and all_pdfs and num_files >= 2:
+                m = re.search(r"\bwatermark\b(?:\s+(?:with|text|as))?\s+(\S+)", user_prompt, re.IGNORECASE)
+                text = (m.group(1).strip() if m else "").strip("\"'")
+                if text:
+                    preset = _infer_compress_preset(user_prompt)
+                    return ClarificationResult(
+                        intent=[
+                            ParsedIntent(
+                                operation_type="merge",
+                                merge={"operation": "merge", "files": file_names},
+                            ),
+                            ParsedIntent(
+                                operation_type="watermark",
+                                watermark={"operation": "watermark", "file": primary, "text": text},
+                            ),
+                            ParsedIntent(
+                                operation_type="compress",
+                                compress={"operation": "compress", "file": primary, "preset": preset},
+                            ),
+                        ]
+                    )
+            
+            # PDF + enhance + flatten + compress → Enhance → Flatten → Compress
+            if wants_enhance and wants_flatten and wants_compress and is_pdf_file:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="enhance_scan",
+                            enhance_scan={"operation": "enhance_scan", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # PDF + clean + flatten + compress → Clean → Flatten → Compress (final pdf)
+            if wants_clean and wants_flatten and wants_compress and is_pdf_file:
+                is_duplicate = bool(re.search(r"\bduplicate\b", prompt_compact))
+                op_type = "remove_duplicate_pages" if is_duplicate else "remove_blank_pages"
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type=op_type,
+                            **{op_type: {"operation": op_type, "file": primary}},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
         
         # ========== IMAGE MULTI-OP PIPELINES ==========
         if is_image_file or all_images:
@@ -1231,6 +1705,240 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
                         ),
                     ]
                 )
+            
+            # Images + combine + OCR → Images to PDF → OCR
+            if (wants_merge or wants_to_pdf) and wants_ocr and all_images:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="images_to_pdf",
+                            images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                    ]
+                )
+            
+            # Images + combine + flatten → Images to PDF → Flatten
+            if (wants_merge or wants_to_pdf) and wants_flatten and all_images:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="images_to_pdf",
+                            images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                    ]
+                )
+            
+            # Image + OCR + compress → OCR → Compress
+            if wants_ocr and wants_compress and is_image_file:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # Image + OCR + page numbers → OCR → Page Numbers
+            if wants_ocr and wants_page_numbers and is_image_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="page_numbers",
+                            page_numbers={"operation": "page_numbers", "file": primary},
+                        ),
+                    ]
+                )
+            
+            # Image + OCR + flatten → OCR → Flatten
+            if wants_ocr and wants_flatten and is_image_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                    ]
+                )
+            
+            # Image + enhance + rotate → Enhance → Rotate
+            if wants_enhance and wants_rotate and is_image_file:
+                degrees = 90
+                if re.search(r"\b(left|counter|anti)\b", prompt_compact):
+                    degrees = 270
+                elif re.search(r"\b180\b", prompt_compact):
+                    degrees = 180
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="enhance_scan",
+                            enhance_scan={"operation": "enhance_scan", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="images_to_pdf",
+                            images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="rotate",
+                            rotate={"operation": "rotate", "file": primary, "degrees": degrees, "pages": None},
+                        ),
+                    ]
+                )
+            
+            # ========== 3-STEP IMAGE PIPELINES ==========
+            
+            # Image + enhance + OCR + compress → Enhance → OCR → Compress
+            if wants_enhance and wants_ocr and wants_compress and is_image_file:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="enhance_scan",
+                            enhance_scan={"operation": "enhance_scan", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # Images + combine + OCR + compress → Images to PDF → OCR → Compress
+            if (wants_merge or wants_to_pdf) and wants_ocr and wants_compress and all_images:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="images_to_pdf",
+                            images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # Images + combine + rotate + compress → Images to PDF → Rotate → Compress
+            if (wants_merge or wants_to_pdf) and wants_rotate and wants_compress and all_images:
+                degrees = 90
+                if re.search(r"\b(left|counter|anti)\b", prompt_compact):
+                    degrees = 270
+                elif re.search(r"\b180\b", prompt_compact):
+                    degrees = 180
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="images_to_pdf",
+                            images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="rotate",
+                            rotate={"operation": "rotate", "file": primary, "degrees": degrees, "pages": None},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # Image + enhance + OCR + page numbers → Enhance → OCR → Page Numbers
+            if wants_enhance and wants_ocr and wants_page_numbers and is_image_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="enhance_scan",
+                            enhance_scan={"operation": "enhance_scan", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="page_numbers",
+                            page_numbers={"operation": "page_numbers", "file": primary},
+                        ),
+                    ]
+                )
+            
+            # Images + combine + watermark + compress → Images to PDF → Watermark → Compress
+            if (wants_merge or wants_to_pdf) and wants_watermark and wants_compress and all_images:
+                m = re.search(r"\bwatermark\b(?:\s+(?:with|text|as))?\s+(\S+)", user_prompt, re.IGNORECASE)
+                text = (m.group(1).strip() if m else "").strip("\"'")
+                if text:
+                    preset = _infer_compress_preset(user_prompt)
+                    return ClarificationResult(
+                        intent=[
+                            ParsedIntent(
+                                operation_type="images_to_pdf",
+                                images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                            ),
+                            ParsedIntent(
+                                operation_type="watermark",
+                                watermark={"operation": "watermark", "file": primary, "text": text},
+                            ),
+                            ParsedIntent(
+                                operation_type="compress",
+                                compress={"operation": "compress", "file": primary, "preset": preset},
+                            ),
+                        ]
+                    )
+            
+            # Image + OCR + rotate + compress → OCR → Rotate → Compress
+            if wants_ocr and wants_rotate and wants_compress and is_image_file:
+                degrees = 90
+                if re.search(r"\b(left|counter|anti)\b", prompt_compact):
+                    degrees = 270
+                elif re.search(r"\b180\b", prompt_compact):
+                    degrees = 180
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="rotate",
+                            rotate={"operation": "rotate", "file": primary, "degrees": degrees, "pages": None},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
         
         # ========== DOCX MULTI-OP PIPELINES ==========
         if is_docx_file:
@@ -1321,6 +2029,148 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
                         clarification="Which pages do you want to delete? (Will convert to PDF first)",
                         options=["delete page 1", "delete pages 2-3", "delete last page"]
                     )
+            
+            # DOCX + to PDF + flatten → DOCX to PDF → Flatten
+            if wants_to_pdf and wants_flatten:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                    ]
+                )
+            
+            # DOCX + clean + compress → DOCX to PDF → Clean → Compress
+            if wants_clean and wants_compress:
+                is_duplicate = bool(re.search(r"\bduplicate\b", prompt_compact))
+                op_type = "remove_duplicate_pages" if is_duplicate else "remove_blank_pages"
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type=op_type,
+                            **{op_type: {"operation": op_type, "file": primary}},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # DOCX + enhance + compress → DOCX to PDF → Enhance → Compress
+            if wants_enhance and wants_compress:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="enhance_scan",
+                            enhance_scan={"operation": "enhance_scan", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # ========== 3-STEP DOCX PIPELINES ==========
+            
+            # DOCX + to PDF + OCR + compress → DOCX to PDF → OCR → Compress
+            if wants_to_pdf and wants_ocr and wants_compress:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # DOCX + to PDF + watermark + compress → DOCX to PDF → Watermark → Compress
+            if wants_to_pdf and wants_watermark and wants_compress:
+                m = re.search(r"\bwatermark\b(?:\s+(?:with|text|as))?\s+(\S+)", user_prompt, re.IGNORECASE)
+                text = (m.group(1).strip() if m else "").strip("\"'")
+                if text:
+                    preset = _infer_compress_preset(user_prompt)
+                    return ClarificationResult(
+                        intent=[
+                            ParsedIntent(
+                                operation_type="docx_to_pdf",
+                                docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                            ),
+                            ParsedIntent(
+                                operation_type="watermark",
+                                watermark={"operation": "watermark", "file": primary, "text": text},
+                            ),
+                            ParsedIntent(
+                                operation_type="compress",
+                                compress={"operation": "compress", "file": primary, "preset": preset},
+                            ),
+                        ]
+                    )
+            
+            # DOCX + to PDF + page numbers + compress → DOCX to PDF → Page Numbers → Compress
+            if wants_to_pdf and wants_page_numbers and wants_compress:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="page_numbers",
+                            page_numbers={"operation": "page_numbers", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            
+            # DOCX + to PDF + flatten + compress → DOCX to PDF → Flatten → Compress
+            if wants_to_pdf and wants_flatten and wants_compress:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
         
         # ========== REDUNDANCY GUARDS (skip if already that format) ==========
         
@@ -1785,6 +2635,485 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
                     flatten_pdf={"operation": "flatten_pdf", "file": primary},
                 )
             )
+        
+        # "optimize file" / "optimize pdf" → Clean → Compress
+        wants_optimize = bool(re.search(r"\b(optimize\s*(file|pdf)?|optimise)\b", prompt_compact))
+        if wants_optimize:
+            if is_pdf_file:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="remove_blank_pages",
+                            remove_blank_pages={"operation": "remove_blank_pages", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            elif is_docx_file:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+        
+        # "final version" / "final pdf" → Clean → Flatten → Compress
+        wants_final = bool(re.search(r"\b(final\s*(version|pdf|copy)?|finalize)\b", prompt_compact))
+        if wants_final:
+            if is_pdf_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="remove_blank_pages",
+                            remove_blank_pages={"operation": "remove_blank_pages", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "balanced"},
+                        ),
+                    ]
+                )
+            elif is_docx_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "balanced"},
+                        ),
+                    ]
+                )
+        
+        # "submission ready" / "college submission" → OCR → Compress
+        wants_submission = bool(re.search(r"\b(submission\s*ready|college\s*submission|submit|assignment)\b", prompt_compact))
+        if wants_submission:
+            if is_pdf_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "balanced"},
+                        ),
+                    ]
+                )
+            elif is_image_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="images_to_pdf",
+                            images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "balanced"},
+                        ),
+                    ]
+                )
+            elif is_docx_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "balanced"},
+                        ),
+                    ]
+                )
+        
+        # "archive ready" / "for archive" → Flatten → Compress
+        wants_archive = bool(re.search(r"\b(archive\s*ready|for\s*archive|archiving)\b", prompt_compact))
+        if wants_archive:
+            if is_pdf_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "balanced"},
+                        ),
+                    ]
+                )
+            elif is_docx_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "balanced"},
+                        ),
+                    ]
+                )
+        
+        # "whatsapp size" / "whatsapp ready" → Compress (very strong)
+        wants_whatsapp = bool(re.search(r"\b(whatsapp|wa)\s*(size|ready)?\b", prompt_compact))
+        if wants_whatsapp:
+            if is_pdf_file:
+                return ClarificationResult(
+                    intent=ParsedIntent(
+                        operation_type="compress",
+                        compress={"operation": "compress", "file": primary, "preset": "strong"},
+                    )
+                )
+            elif is_docx_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "strong"},
+                        ),
+                    ]
+                )
+            elif is_image_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="images_to_pdf",
+                            images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "strong"},
+                        ),
+                    ]
+                )
+        
+        # "govt submission" / "government" → OCR → Flatten
+        wants_govt = bool(re.search(r"\b(govt|government)\s*(submission)?\b", prompt_compact))
+        if wants_govt:
+            if is_pdf_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                    ]
+                )
+            elif is_image_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="images_to_pdf",
+                            images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                    ]
+                )
+        
+        # "scan quality fix" / "improve scan quality" → Enhance → OCR
+        wants_scan_quality = bool(re.search(r"\b(scan\s*quality|quality\s*fix|improve\s*scan)\b", prompt_compact))
+        if wants_scan_quality:
+            if is_pdf_file or is_image_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="enhance_scan",
+                            enhance_scan={"operation": "enhance_scan", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="ocr",
+                            ocr={"operation": "ocr", "file": primary, "language": "eng", "deskew": True},
+                        ),
+                    ]
+                )
+        
+        # "make it neat" / "clean up" → Clean → Enhance
+        wants_neat = bool(re.search(r"\b(make\s*it\s*neat|neat\s*up|tidy)\b", prompt_compact))
+        if wants_neat:
+            if is_pdf_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="remove_blank_pages",
+                            remove_blank_pages={"operation": "remove_blank_pages", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="enhance_scan",
+                            enhance_scan={"operation": "enhance_scan", "file": primary},
+                        ),
+                    ]
+                )
+        
+        # "make professional" → Clean → Flatten → Compress
+        wants_professional = bool(re.search(r"\b(make\s*professional|professional\s*(copy|version)?|look\s*professional)\b", prompt_compact))
+        if wants_professional:
+            if is_pdf_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="remove_blank_pages",
+                            remove_blank_pages={"operation": "remove_blank_pages", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "balanced"},
+                        ),
+                    ]
+                )
+            elif is_docx_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="flatten_pdf",
+                            flatten_pdf={"operation": "flatten_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "balanced"},
+                        ),
+                    ]
+                )
+        
+        # "sendable file" / "shareable" → Compress
+        wants_sendable = bool(re.search(r"\b(sendable|shareable|share\s*ready)\b", prompt_compact))
+        if wants_sendable:
+            if is_pdf_file:
+                return ClarificationResult(
+                    intent=ParsedIntent(
+                        operation_type="compress",
+                        compress={"operation": "compress", "file": primary, "preset": "balanced"},
+                    )
+                )
+            elif is_docx_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "balanced"},
+                        ),
+                    ]
+                )
+            elif is_image_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="images_to_pdf",
+                            images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "balanced"},
+                        ),
+                    ]
+                )
+        
+        # "convert and shrink" / "convert & compress" → Convert → Compress
+        wants_convert_shrink = bool(re.search(r"\b(convert\s*(and|&)\s*(shrink|compress|smaller))\b", prompt_compact))
+        if wants_convert_shrink:
+            if is_docx_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "balanced"},
+                        ),
+                    ]
+                )
+            elif is_image_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="images_to_pdf",
+                            images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "balanced"},
+                        ),
+                    ]
+                )
+        
+        # "scan to pdf" → Images to PDF (if images) or just pass through
+        wants_scan_to_pdf = bool(re.search(r"\bscan\s*to\s*pdf\b", prompt_compact))
+        if wants_scan_to_pdf:
+            if is_image_file or all_images:
+                return ClarificationResult(
+                    intent=ParsedIntent(
+                        operation_type="images_to_pdf",
+                        images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                    )
+                )
+        
+        # "combine and fix" / "merge and clean" → Merge → Clean
+        wants_combine_fix = bool(re.search(r"\b(combine\s*(and|&)\s*fix|merge\s*(and|&)\s*clean)\b", prompt_compact))
+        if wants_combine_fix and all_pdfs and num_files >= 2:
+            return ClarificationResult(
+                intent=[
+                    ParsedIntent(
+                        operation_type="merge",
+                        merge={"operation": "merge", "files": file_names},
+                    ),
+                    ParsedIntent(
+                        operation_type="remove_blank_pages",
+                        remove_blank_pages={"operation": "remove_blank_pages", "file": primary},
+                    ),
+                ]
+            )
+        
+        # "combine and shrink" / "merge and compress" → Merge → Compress
+        wants_combine_shrink = bool(re.search(r"\b(combine\s*(and|&)\s*(shrink|compress)|merge\s*(and|&)\s*(shrink|compress))\b", prompt_compact))
+        if wants_combine_shrink:
+            if all_pdfs and num_files >= 2:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="merge",
+                            merge={"operation": "merge", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+            elif all_images:
+                preset = _infer_compress_preset(user_prompt)
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="images_to_pdf",
+                            images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": preset},
+                        ),
+                    ]
+                )
+        
+        # "fix orientation" / "fix rotation" → Rotate
+        wants_fix_orientation = bool(re.search(r"\b(fix\s*(orientation|rotation)|orientation\s*fix)\b", prompt_compact))
+        if wants_fix_orientation:
+            if is_pdf_file:
+                return ClarificationResult(
+                    intent=ParsedIntent(
+                        operation_type="rotate",
+                        rotate={"operation": "rotate", "file": primary, "degrees": 90, "pages": None},
+                    )
+                )
+            elif is_image_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="images_to_pdf",
+                            images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="rotate",
+                            rotate={"operation": "rotate", "file": primary, "degrees": 90, "pages": None},
+                        ),
+                    ]
+                )
+        
+        # "remove extra pages" / "extra pages" → Clean (remove blank)
+        wants_remove_extra = bool(re.search(r"\b(remove\s*extra|extra\s*pages?|unwanted\s*pages?)\b", prompt_compact))
+        if wants_remove_extra:
+            if is_pdf_file:
+                return ClarificationResult(
+                    intent=ParsedIntent(
+                        operation_type="remove_blank_pages",
+                        remove_blank_pages={"operation": "remove_blank_pages", "file": primary},
+                    )
+                )
+        
+        # "mobile optimized" / "for mobile" → Compress (strong)
+        wants_mobile = bool(re.search(r"\b(mobile\s*(optimized?|ready)?|for\s*mobile|phone\s*size)\b", prompt_compact))
+        if wants_mobile:
+            if is_pdf_file:
+                return ClarificationResult(
+                    intent=ParsedIntent(
+                        operation_type="compress",
+                        compress={"operation": "compress", "file": primary, "preset": "strong"},
+                    )
+                )
+            elif is_docx_file:
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="compress",
+                            compress={"operation": "compress", "file": primary, "preset": "strong"},
+                        ),
+                    ]
+                )
         
         # ========== TRULY INCOMPATIBLE (no workaround) ==========
         

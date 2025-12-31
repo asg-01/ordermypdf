@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+} from "react";
 
 // Simple mobile detection
 function isMobileDevice() {
@@ -605,7 +611,7 @@ export default function App() {
   const [lastSubmittedPrompt, setLastSubmittedPrompt] = useState("");
   const [fileAttention, setFileAttention] = useState(false);
   const [ramStats, setRamStats] = useState(null);
-  
+
   // Track uploaded files to avoid re-uploading
   const [uploadedFileNames, setUploadedFileNames] = useState([]); // file names on server
   const [lastUploadedFiles, setLastUploadedFiles] = useState([]); // File objects that were uploaded
@@ -650,7 +656,7 @@ export default function App() {
   // Fetch RAM stats on mount and periodically when idle
   useEffect(() => {
     let interval = null;
-    
+
     const fetchRam = async () => {
       try {
         const res = await fetch("/api/ram");
@@ -969,12 +975,13 @@ export default function App() {
   const canReuseFiles = useCallback(() => {
     if (!uploadedFileNames.length || !lastUploadedFiles.length) return false;
     if (files.length !== lastUploadedFiles.length) return false;
-    
+
     // Check if all files match by name and size
-    return files.every((f, i) => 
-      lastUploadedFiles[i] && 
-      f.name === lastUploadedFiles[i].name && 
-      f.size === lastUploadedFiles[i].size
+    return files.every(
+      (f, i) =>
+        lastUploadedFiles[i] &&
+        f.name === lastUploadedFiles[i].name &&
+        f.size === lastUploadedFiles[i].size
     );
   }, [files, uploadedFileNames, lastUploadedFiles]);
 
@@ -1013,9 +1020,15 @@ export default function App() {
     setLastFileName(accepted[accepted.length - 1].name);
 
     // Check if these are different files - reset uploaded state
-    const filesChanged = next.length !== lastUploadedFiles.length ||
-      next.some((f, i) => !lastUploadedFiles[i] || f.name !== lastUploadedFiles[i].name || f.size !== lastUploadedFiles[i].size);
-    
+    const filesChanged =
+      next.length !== lastUploadedFiles.length ||
+      next.some(
+        (f, i) =>
+          !lastUploadedFiles[i] ||
+          f.name !== lastUploadedFiles[i].name ||
+          f.size !== lastUploadedFiles[i].size
+      );
+
     if (filesChanged) {
       setUploadedFileNames([]);
       setLastUploadedFiles([]);
@@ -1029,12 +1042,16 @@ export default function App() {
     );
     if (totalSizeMB > 60 || maxFileMB > 60) {
       showToast(
-        `Large upload (${Math.round(totalSizeMB)}MB total) — upload depends on your network speed.`,
+        `Large upload (${Math.round(
+          totalSizeMB
+        )}MB total) — upload depends on your network speed.`,
         6000
       );
     } else if (totalSizeMB > 50) {
       showToast(
-        `Large upload (${Math.round(totalSizeMB)}MB total) — expect longer processing time.`,
+        `Large upload (${Math.round(
+          totalSizeMB
+        )}MB total) — expect longer processing time.`,
         5000
       );
     }
@@ -1059,7 +1076,7 @@ export default function App() {
       abortControllerRef.current.xhr.abort();
       abortControllerRef.current.xhr = null;
     }
-    
+
     // Cancel the polling abort controller
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -1203,7 +1220,9 @@ export default function App() {
             console.log("[RAM DEBUG resumePending] RAM data:", statusData.ram);
             setRamStats(statusData.ram);
           } else {
-            console.warn("[RAM DEBUG resumePending] No ram field in statusData");
+            console.warn(
+              "[RAM DEBUG resumePending] No ram field in statusData"
+            );
             // Don't clear ramStats - periodic fetch will update it
           }
         } catch {
@@ -1218,7 +1237,7 @@ export default function App() {
       if (filesCanBeReused && uploadedFileNames.length > 0) {
         console.log("[Submit] Reusing uploaded files:", uploadedFileNames);
         setIsUploading(false);
-        
+
         const formData = new FormData();
         formData.append("file_names", uploadedFileNames.join(","));
         formData.append("prompt", userText);
@@ -1241,7 +1260,9 @@ export default function App() {
             setUploadedFileNames([]);
             setLastUploadedFiles([]);
           } else {
-            throw new Error(errorData.detail || `Server error (${response.status})`);
+            throw new Error(
+              errorData.detail || `Server error (${response.status})`
+            );
           }
         } else {
           const result = await response.json();
@@ -1249,12 +1270,12 @@ export default function App() {
           resultFileNames = result.uploaded_files || uploadedFileNames;
         }
       }
-      
+
       // If no jobId yet, do normal upload
       if (!jobId) {
         console.log("[Submit] Uploading files...");
         setIsUploading(true);
-        
+
         const formData = new FormData();
         files.forEach((file) => formData.append("files", file));
         formData.append("prompt", userText);
@@ -1304,9 +1325,15 @@ export default function App() {
             }
           });
 
-          xhr.addEventListener("error", () => reject(new Error("Connection failed")));
-          xhr.addEventListener("timeout", () => reject(new Error("Upload timed out")));
-          xhr.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")));
+          xhr.addEventListener("error", () =>
+            reject(new Error("Connection failed"))
+          );
+          xhr.addEventListener("timeout", () =>
+            reject(new Error("Upload timed out"))
+          );
+          xhr.addEventListener("abort", () =>
+            reject(new DOMException("Cancelled", "AbortError"))
+          );
 
           xhr.open("POST", "/submit");
           xhr.send(formData);
@@ -1547,7 +1574,8 @@ export default function App() {
   const ramIndicator = useMemo(() => {
     const level = (ramStats?.level || "").toLowerCase();
     if (level === "high") return { label: "High", className: "text-rose-400" };
-    if (level === "medium") return { label: "Medium", className: "text-amber-300" };
+    if (level === "medium")
+      return { label: "Medium", className: "text-amber-300" };
     if (level === "low") return { label: "Low", className: "text-green-400" };
     return { label: "—", className: "text-slate-500" };
   }, [ramStats]);
@@ -1602,8 +1630,8 @@ export default function App() {
                 {Icons.bolt}
               </span>
               Merge, split, compress, OCR, convert (PDF ↔ DOCX/JPG/PNG), remove
-              blank/duplicate pages, enhance scans, and flatten PDFs — just upload
-              and describe.
+              blank/duplicate pages, enhance scans, and flatten PDFs — just
+              upload and describe.
             </p>
           </div>
         </header>
@@ -1619,17 +1647,23 @@ export default function App() {
                     Session
                   </div>
                   <div className="mt-1 text-[11px] text-slate-400 truncate">
-                    {files.length ? lastFileName || files[0]?.name : "No files selected"}
+                    {files.length
+                      ? lastFileName || files[0]?.name
+                      : "No files selected"}
                   </div>
                 </div>
                 <div className="shrink-0 flex items-center gap-2">
                   <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] text-slate-300">
                     {fileBadge}
                   </span>
-                  <span className={cn(
-                    "rounded-full border px-3 py-1 text-[11px] flex items-center gap-1.5",
-                    loading ? "border-cyan-400/30 bg-cyan-400/10 text-cyan-200" : "border-white/10 bg-black/20 text-slate-300"
-                  )}>
+                  <span
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-[11px] flex items-center gap-1.5",
+                      loading
+                        ? "border-cyan-400/30 bg-cyan-400/10 text-cyan-200"
+                        : "border-white/10 bg-black/20 text-slate-300"
+                    )}
+                  >
                     {loading ? (
                       <>
                         <span className="text-cyan-300">{Icons.spinner}</span>
@@ -1646,11 +1680,17 @@ export default function App() {
               </div>
 
               {/* Live RAM indicator (mobile). No ETA here; chat already shows it. */}
-              {loading && ramStats && (ramStats.rss_mb || ramStats.peak_rss_mb) ? (
+              {loading &&
+              ramStats &&
+              (ramStats.rss_mb || ramStats.peak_rss_mb) ? (
                 <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-300">
-                  <span className={cn(ramIndicator.className)}>{Icons.circle}</span>
+                  <span className={cn(ramIndicator.className)}>
+                    {Icons.circle}
+                  </span>
                   <span className="text-slate-200">RAM</span>
-                  <span className="text-slate-400">{(ramStats.rss_mb || ramStats.peak_rss_mb)}MB</span>
+                  <span className="text-slate-400">
+                    {ramStats.rss_mb || ramStats.peak_rss_mb}MB
+                  </span>
                 </div>
               ) : null}
             </div>
@@ -1676,7 +1716,9 @@ export default function App() {
 
                 {loading && ramPillText ? (
                   <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] text-slate-300 flex items-center gap-1.5">
-                    <span className={cn(ramIndicator.className)}>{Icons.circle}</span>
+                    <span className={cn(ramIndicator.className)}>
+                      {Icons.circle}
+                    </span>
                     <span className="text-slate-200">{ramPillText}</span>
                   </span>
                 ) : null}
@@ -1821,7 +1863,8 @@ export default function App() {
                         "group inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition",
                         "border-white/10 bg-white/5 hover:bg-white/10",
                         "focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60",
-                        fileAttention && "ring-2 ring-amber-300/60 animate-pulse"
+                        fileAttention &&
+                          "ring-2 ring-amber-300/60 animate-pulse"
                       )}
                     >
                       <span className="text-cyan-300/90">{Icons.folder}</span>
@@ -1856,7 +1899,9 @@ export default function App() {
                       </div>
                       {files.length ? (
                         <div className="mt-1 text-[11px] text-slate-400">
-                          {hasMultiple ? "Processing all files." : "Ready to process."}
+                          {hasMultiple
+                            ? "Processing all files."
+                            : "Ready to process."}
                         </div>
                       ) : null}
                     </div>
@@ -2162,11 +2207,15 @@ export default function App() {
                     RAM usage
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={cn(ramIndicator.className)}>{Icons.circle}</span>
+                    <span className={cn(ramIndicator.className)}>
+                      {Icons.circle}
+                    </span>
                     <span className="text-slate-200">{ramIndicator.label}</span>
                     <span className="text-slate-500">•</span>
                     <span className="text-slate-400">
-                      {ramStats ? `${ramStats.rss_mb || ramStats.peak_rss_mb || "—"}MB` : "—"}
+                      {ramStats
+                        ? `${ramStats.rss_mb || ramStats.peak_rss_mb || "—"}MB`
+                        : "—"}
                     </span>
                   </div>
                 </div>
