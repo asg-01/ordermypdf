@@ -1637,7 +1637,7 @@ export default function App() {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept="application/pdf,image/png,image/jpeg"
+                      accept="application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                       multiple
                       onChange={handleFileChange}
                       className="hidden"

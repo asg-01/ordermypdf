@@ -86,6 +86,11 @@ SUPPORTED OPERATIONS:
 13. IMAGES_TO_PDF: Combine uploaded images into one PDF
 14. SPLIT_TO_FILES: Split pages into separate PDFs (returns a .zip)
 15. OCR: Make a searchable PDF (OCR)
+16. DOCX_TO_PDF: Convert a DOCX to PDF
+17. REMOVE_BLANK_PAGES: Remove blank/empty pages from a PDF
+18. REMOVE_DUPLICATE_PAGES: Remove duplicate pages from a PDF
+19. ENHANCE_SCAN: Enhance a scanned PDF for readability (image-based)
+20. FLATTEN_PDF: Flatten/sanitize a PDF (optimize structure)
 
 CRITICAL RULES:
 - You do NOT access files
@@ -305,6 +310,51 @@ For OCR:
     "file": "scan.pdf",
     "language": "eng",
     "deskew": true
+  }
+}
+
+For DOCX_TO_PDF:
+{
+  "operation_type": "docx_to_pdf",
+  "docx_to_pdf": {
+    "operation": "docx_to_pdf",
+    "file": "document.docx"
+  }
+}
+
+For REMOVE_BLANK_PAGES:
+{
+  "operation_type": "remove_blank_pages",
+  "remove_blank_pages": {
+    "operation": "remove_blank_pages",
+    "file": "document.pdf"
+  }
+}
+
+For REMOVE_DUPLICATE_PAGES:
+{
+  "operation_type": "remove_duplicate_pages",
+  "remove_duplicate_pages": {
+    "operation": "remove_duplicate_pages",
+    "file": "document.pdf"
+  }
+}
+
+For ENHANCE_SCAN:
+{
+  "operation_type": "enhance_scan",
+  "enhance_scan": {
+    "operation": "enhance_scan",
+    "file": "scan.pdf"
+  }
+}
+
+For FLATTEN_PDF:
+{
+  "operation_type": "flatten_pdf",
+  "flatten_pdf": {
+    "operation": "flatten_pdf",
+    "file": "document.pdf"
   }
 }
 

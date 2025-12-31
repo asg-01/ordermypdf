@@ -29,6 +29,7 @@ from app.pdf_operations import (
     delete_pages,
     compress_pdf,
     pdf_to_docx,
+    docx_to_pdf,
     compress_pdf_to_target,
     rotate_pdf,
     reorder_pdf,
@@ -39,6 +40,10 @@ from app.pdf_operations import (
     images_to_pdf,
     split_pages_to_files_zip,
     ocr_pdf,
+    remove_blank_pages,
+    remove_duplicate_pages,
+    enhance_scan,
+    flatten_pdf,
     ensure_temp_dirs,
     get_upload_path,
     get_output_path
@@ -387,6 +392,10 @@ def execute_operation(intent: ParsedIntent) -> tuple[str, str]:
         lower = (name or "").lower()
         if not any(lower.endswith(ext) for ext in (".png", ".jpg", ".jpeg")):
             raise ValueError("This operation requires image files (png/jpg/jpeg) as input.")
+
+    def require_docx(name: str) -> None:
+        if not (name or "").lower().endswith(".docx"):
+            raise ValueError("This operation requires a DOCX input file.")
     
     if intent.operation_type == "merge":
         for f in operation.files:
@@ -495,6 +504,36 @@ def execute_operation(intent: ParsedIntent) -> tuple[str, str]:
         )
         message = f"OCR complete for {operation.file}"
         return output_file, message
+
+    elif intent.operation_type == "docx_to_pdf":
+        require_docx(operation.file)
+        output_file = docx_to_pdf(operation.file)
+        message = f"Successfully converted {operation.file} to PDF"
+        return output_file, message
+
+    elif intent.operation_type == "remove_blank_pages":
+        require_pdf(operation.file)
+        output_file = remove_blank_pages(operation.file)
+        message = f"Removed blank pages from {operation.file}"
+        return output_file, message
+
+    elif intent.operation_type == "remove_duplicate_pages":
+        require_pdf(operation.file)
+        output_file = remove_duplicate_pages(operation.file)
+        message = f"Removed duplicate pages from {operation.file}"
+        return output_file, message
+
+    elif intent.operation_type == "enhance_scan":
+        require_pdf(operation.file)
+        output_file = enhance_scan(operation.file)
+        message = f"Enhanced scan for {operation.file}"
+        return output_file, message
+
+    elif intent.operation_type == "flatten_pdf":
+        require_pdf(operation.file)
+        output_file = flatten_pdf(operation.file)
+        message = f"Flattened {operation.file}"
+        return output_file, message
     else:
         raise ValueError(f"Unknown operation type: {intent.operation_type}")
 
@@ -513,6 +552,10 @@ def execute_operation_pipeline(intents: list[ParsedIntent], uploaded_files: list
         def require_pdf_name(name: str) -> None:
             if not (name or "").lower().endswith(".pdf"):
                 raise ValueError("This step requires a PDF input file.")
+
+        def require_docx_name(name: str) -> None:
+            if not (name or "").lower().endswith(".docx"):
+                raise ValueError("This step requires a DOCX input file.")
 
         # Determine input for this step
         if idx == 1:
@@ -541,8 +584,8 @@ def execute_operation_pipeline(intents: list[ParsedIntent], uploaded_files: list
             raise ValueError("images_to_pdf can only be the first step in a multi-step request")
 
         # If we already converted to DOCX, we cannot apply PDF ops after
-        if current_file and current_file.lower().endswith(".docx"):
-            raise ValueError("Cannot run operations after converting to DOCX")
+        if current_file and current_file.lower().endswith(".docx") and intent.operation_type != "docx_to_pdf":
+            raise ValueError("Cannot run operations after converting to DOCX (except DOCX→PDF)")
         if current_file and current_file.lower().endswith(".txt"):
             raise ValueError("Cannot run operations after extracting text")
         if current_file and current_file.lower().endswith(".zip"):
@@ -658,6 +701,36 @@ def execute_operation_pipeline(intents: list[ParsedIntent], uploaded_files: list
                 output_name=output_name,
             )
             messages.append("OCR")
+
+        elif intent.operation_type == "docx_to_pdf":
+            require_docx_name(current_file)
+            output_name = f"multi_step_{idx}_docx_to_pdf.pdf"
+            current_file = docx_to_pdf(current_file, output_name=output_name)
+            messages.append("DOCX→PDF")
+
+        elif intent.operation_type == "remove_blank_pages":
+            require_pdf_name(current_file)
+            output_name = f"multi_step_{idx}_no_blanks.pdf"
+            current_file = remove_blank_pages(current_file, output_name=output_name)
+            messages.append("Removed blank pages")
+
+        elif intent.operation_type == "remove_duplicate_pages":
+            require_pdf_name(current_file)
+            output_name = f"multi_step_{idx}_no_duplicates.pdf"
+            current_file = remove_duplicate_pages(current_file, output_name=output_name)
+            messages.append("Removed duplicate pages")
+
+        elif intent.operation_type == "enhance_scan":
+            require_pdf_name(current_file)
+            output_name = f"multi_step_{idx}_enhanced_scan.pdf"
+            current_file = enhance_scan(current_file, output_name=output_name)
+            messages.append("Enhanced scan")
+
+        elif intent.operation_type == "flatten_pdf":
+            require_pdf_name(current_file)
+            output_name = f"multi_step_{idx}_flattened.pdf"
+            current_file = flatten_pdf(current_file, output_name=output_name)
+            messages.append("Flattened")
 
         else:
             raise ValueError(f"Unknown operation type: {intent.operation_type}")

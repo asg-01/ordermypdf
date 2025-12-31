@@ -2,7 +2,7 @@
 Pydantic models for request/response validation and AI intent parsing.
 """
 
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
 
@@ -78,9 +78,39 @@ class ReorderIntent(BaseModel):
     """Intent to reorder PDF pages"""
     operation: Literal["reorder"] = "reorder"
     file: str = Field(..., description="Source PDF file")
-    new_order: List[int] = Field(
-        ..., description="New page order (1-indexed). Must include each page exactly once."
+    new_order: Union[List[int], Literal["reverse"]] = Field(
+        ..., description="New page order (1-indexed). Must include each page exactly once, or 'reverse' to reverse all pages."
     )
+
+
+class DocxToPdfIntent(BaseModel):
+    """Intent to convert DOCX to PDF"""
+    operation: Literal["docx_to_pdf"] = "docx_to_pdf"
+    file: str = Field(..., description="DOCX file to convert")
+
+
+class RemoveBlankPagesIntent(BaseModel):
+    """Intent to remove blank/empty pages from a PDF"""
+    operation: Literal["remove_blank_pages"] = "remove_blank_pages"
+    file: str = Field(..., description="Source PDF file")
+
+
+class RemoveDuplicatePagesIntent(BaseModel):
+    """Intent to remove duplicate pages from a PDF"""
+    operation: Literal["remove_duplicate_pages"] = "remove_duplicate_pages"
+    file: str = Field(..., description="Source PDF file")
+
+
+class EnhanceScanIntent(BaseModel):
+    """Intent to enhance a scanned PDF for readability (image-based processing)"""
+    operation: Literal["enhance_scan"] = "enhance_scan"
+    file: str = Field(..., description="Source PDF file")
+
+
+class FlattenPdfIntent(BaseModel):
+    """Intent to flatten/sanitize a PDF (remove incremental/update structure and optimize)"""
+    operation: Literal["flatten_pdf"] = "flatten_pdf"
+    file: str = Field(..., description="Source PDF file")
 
 
 class WatermarkIntent(BaseModel):
@@ -188,6 +218,11 @@ class ParsedIntent(BaseModel):
         "images_to_pdf",
         "split_to_files",
         "ocr",
+        "docx_to_pdf",
+        "remove_blank_pages",
+        "remove_duplicate_pages",
+        "enhance_scan",
+        "flatten_pdf",
     ]
     merge: Optional[MergeIntent] = None
     split: Optional[SplitIntent] = None
@@ -204,6 +239,11 @@ class ParsedIntent(BaseModel):
     images_to_pdf: Optional[ImagesToPdfIntent] = None
     split_to_files: Optional[SplitToFilesIntent] = None
     ocr: Optional[OcrIntent] = None
+    docx_to_pdf: Optional[DocxToPdfIntent] = None
+    remove_blank_pages: Optional[RemoveBlankPagesIntent] = None
+    remove_duplicate_pages: Optional[RemoveDuplicatePagesIntent] = None
+    enhance_scan: Optional[EnhanceScanIntent] = None
+    flatten_pdf: Optional[FlattenPdfIntent] = None
 
     def get_operation(self):
         """Get the actual operation intent"""
@@ -237,4 +277,14 @@ class ParsedIntent(BaseModel):
             return self.split_to_files
         elif self.operation_type == "ocr":
             return self.ocr
+        elif self.operation_type == "docx_to_pdf":
+            return self.docx_to_pdf
+        elif self.operation_type == "remove_blank_pages":
+            return self.remove_blank_pages
+        elif self.operation_type == "remove_duplicate_pages":
+            return self.remove_duplicate_pages
+        elif self.operation_type == "enhance_scan":
+            return self.enhance_scan
+        elif self.operation_type == "flatten_pdf":
+            return self.flatten_pdf
         return None

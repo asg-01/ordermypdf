@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import List, Optional
 import io
 import zipfile
+import hashlib
 
 from pypdf import PdfReader, PdfWriter
 from pdf2docx import Converter
@@ -285,20 +286,171 @@ def compress_pdf(file_name: str, output_name: str = "compressed_output.pdf", pre
 # ============================================
 def pdf_to_docx(file_name: str, output_name: str = "converted_output.docx") -> str:
     """
-    Convert a PDF file to DOCX format using pdf2docx.
+    Convert a PDF file to DOCX format (low-memory, text-first).
+
+    NOTE: This prioritizes stability on low-RAM servers (Render free tier).
+    It extracts text per page and writes it into a DOCX. Layout fidelity is not preserved.
     """
     ensure_temp_dirs()
     input_path = get_upload_path(file_name)
     output_path = get_output_path(output_name)
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"File not found: {file_name}")
-    
+
     try:
-        cv = Converter(input_path)
-        cv.convert(output_path, start=0, end=None)
-        cv.close()
+        from docx import Document  # type: ignore
+        from docx.shared import Pt  # type: ignore
+    except Exception as e:
+        raise Exception(
+            "DOCX export requires the optional dependency 'python-docx'. "
+            "Install with: pip install python-docx"
+        )
+
+    try:
+        doc = fitz.open(input_path)
+        out = Document()
+        style = out.styles["Normal"]
+        style.font.name = "Calibri"
+        style.font.size = Pt(11)
+
+        for page_index in range(doc.page_count):
+            page = doc.load_page(page_index)
+            text = (page.get_text("text") or "").strip()
+            if text:
+                for line in text.splitlines():
+                    out.add_paragraph(line)
+            else:
+                out.add_paragraph("")
+
+            if page_index != doc.page_count - 1:
+                out.add_page_break()
+
+        doc.close()
+        out.save(output_path)
     except Exception as e:
         raise Exception(f"PDF to DOCX conversion failed: {e}")
+    return output_name
+
+
+def docx_to_pdf(file_name: str, output_name: str = "converted_output.pdf") -> str:
+    """Convert a DOCX file to PDF.
+
+    This uses LibreOffice (soffice) if available. On minimal containers it may not be installed;
+    in that case we return a clear error instead of crashing deployment.
+    """
+    ensure_temp_dirs()
+    input_path = get_upload_path(file_name)
+    if not os.path.exists(input_path):
+        raise FileNotFoundError(f"File not found: {file_name}")
+
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    # If LibreOffice is not available (common on minimal containers), fall back
+    # to a text-only PDF render (medium accuracy, low RAM).
+    if not soffice:
+        try:
+            from docx import Document  # type: ignore
+            from reportlab.pdfgen import canvas  # type: ignore
+            from reportlab.lib.pagesizes import A4  # type: ignore
+        except Exception:
+            raise Exception(
+                "DOCX → PDF conversion requires either LibreOffice (soffice) on the server or the "
+                "optional dependencies 'python-docx' and 'reportlab'."
+            )
+
+        doc = Document(input_path)
+        output_path = get_output_path(output_name)
+
+        page_w, page_h = A4
+        margin = 48
+        font_name = "Helvetica"
+        font_size = 11
+        line_h = 14
+
+        c = canvas.Canvas(output_path, pagesize=A4)
+        c.setFont(font_name, font_size)
+        x = margin
+        y = page_h - margin
+
+        def wrap_text(text: str, max_width: float) -> list[str]:
+            words = (text or "").split()
+            if not words:
+                return [""]
+            lines: list[str] = []
+            cur: list[str] = []
+            for w in words:
+                trial = (" ".join(cur + [w])).strip()
+                if c.stringWidth(trial, font_name, font_size) <= max_width:
+                    cur.append(w)
+                else:
+                    if cur:
+                        lines.append(" ".join(cur))
+                    cur = [w]
+            if cur:
+                lines.append(" ".join(cur))
+            return lines
+
+        max_width = page_w - 2 * margin
+        for para in doc.paragraphs:
+            text = (para.text or "").strip()
+            # Preserve blank lines
+            if not text:
+                y -= line_h
+                if y < margin:
+                    c.showPage()
+                    c.setFont(font_name, font_size)
+                    y = page_h - margin
+                continue
+
+            for line in wrap_text(text, max_width=max_width):
+                c.drawString(x, y, line)
+                y -= line_h
+                if y < margin:
+                    c.showPage()
+                    c.setFont(font_name, font_size)
+                    y = page_h - margin
+
+        c.save()
+        return output_name
+
+    out_dir = os.path.abspath("outputs")
+
+    # LibreOffice writes output name based on input; we rename after.
+    try:
+        subprocess.run(
+            [
+                soffice,
+                "--headless",
+                "--nologo",
+                "--nofirststartwizard",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                out_dir,
+                os.path.abspath(input_path),
+            ],
+            check=True,
+            timeout=180,
+        )
+    except subprocess.TimeoutExpired:
+        raise Exception("DOCX → PDF conversion timed out.")
+    except Exception as e:
+        raise Exception(f"DOCX → PDF conversion failed: {e}")
+
+    base = os.path.splitext(os.path.basename(file_name))[0]
+    produced = os.path.join(out_dir, f"{base}.pdf")
+    if not os.path.exists(produced):
+        # LibreOffice may sanitize the filename; best-effort fallback.
+        raise Exception("DOCX → PDF conversion failed: output PDF not produced.")
+
+    final_path = get_output_path(output_name)
+    try:
+        if os.path.exists(final_path):
+            os.remove(final_path)
+        os.replace(produced, final_path)
+    except Exception:
+        # If rename fails, keep produced.
+        return os.path.basename(produced)
+
     return output_name
 
 
@@ -473,7 +625,7 @@ def watermark_pdf(
     angle: int = 30,
     output_name: str = "watermarked_output.pdf",
 ) -> str:
-    """Add a diagonal text watermark to each page."""
+    """Add a text watermark to each page (low-RAM overlay stamping)."""
     ensure_temp_dirs()
 
     input_path = get_upload_path(file_name)
@@ -483,41 +635,57 @@ def watermark_pdf(
     if opacity < 0 or opacity > 1:
         raise ValueError("opacity must be between 0 and 1")
 
-    # PyMuPDF's rotate parameter for text insertion is limited to multiples of 90.
-    # To keep the API flexible (user might ask for 30°), round to nearest 90.
     try:
-        angle_int = int(angle)
+        from reportlab.pdfgen import canvas  # type: ignore
     except Exception:
-        angle_int = 0
-    angle_quantized = (int(round(angle_int / 90.0)) * 90) % 360
-
-    doc = fitz.open(input_path)
-
-    for page in doc:
-        rect = page.rect
-        # Watermark box roughly centered
-        box = fitz.Rect(
-            rect.width * 0.10,
-            rect.height * 0.40,
-            rect.width * 0.90,
-            rect.height * 0.60,
+        raise Exception(
+            "Watermark requires the optional dependency 'reportlab'. Install with: pip install reportlab"
         )
 
-        shape = page.new_shape()
-        shape.insert_textbox(
-            box,
-            text,
-            fontsize=max(18, min(72, int(min(rect.width, rect.height) / 10))),
-            fontname="helv",
-            rotate=angle_quantized,
-            align=1,
-        )
-        shape.finish(color=(0, 0, 0), fill=None, fill_opacity=opacity, stroke_opacity=opacity)
-        shape.commit(overlay=True)
+    reader = PdfReader(input_path)
+    writer = PdfWriter()
+
+    def _overlay_page(w: float, h: float) -> "PdfReader":
+        buf = io.BytesIO()
+        c = canvas.Canvas(buf, pagesize=(w, h))
+        try:
+            c.setFillAlpha(float(opacity))
+        except Exception:
+            pass
+        c.saveState()
+        c.translate(w / 2.0, h / 2.0)
+        try:
+            c.rotate(float(angle or 0))
+        except Exception:
+            c.rotate(0)
+        # Font size based on page diagonal-ish
+        base = min(w, h)
+        font_size = max(18, min(72, int(base / 10)))
+        c.setFont("Helvetica", font_size)
+        c.setFillColorRGB(0, 0, 0)
+        # Centered text
+        c.drawCentredString(0, 0, text)
+        c.restoreState()
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        return PdfReader(buf)
+
+    for page in reader.pages:
+        mb = page.mediabox
+        w = float(mb.width)
+        h = float(mb.height)
+        overlay_pdf = _overlay_page(w, h)
+        overlay_page = overlay_pdf.pages[0]
+        try:
+            page.merge_page(overlay_page)
+        except Exception:
+            page.mergePage(overlay_page)  # type: ignore
+        writer.add_page(page)
 
     output_path = get_output_path(output_name)
-    doc.save(output_path)
-    doc.close()
+    with open(output_path, "wb") as f:
+        writer.write(f)
     return output_name
 
 
@@ -527,48 +695,256 @@ def add_page_numbers(
     start_at: int = 1,
     output_name: str = "page_numbers_output.pdf",
 ) -> str:
-    """Add page numbers to each page."""
+    """Add page numbers to each page (low-RAM overlay stamping)."""
     ensure_temp_dirs()
 
     input_path = get_upload_path(file_name)
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"File not found: {file_name}")
 
-    doc = fitz.open(input_path)
+    try:
+        from reportlab.pdfgen import canvas  # type: ignore
+    except Exception:
+        raise Exception(
+            "Page numbers require the optional dependency 'reportlab'. Install with: pip install reportlab"
+        )
 
-    def _pos(rect: fitz.Rect) -> fitz.Point:
-        margin_x = rect.width * 0.06
-        margin_y = rect.height * 0.04
+    reader = PdfReader(input_path)
+    writer = PdfWriter()
+
+    def _coords(w: float, h: float) -> tuple[float, float, int]:
+        margin = 28.0
+        font_size = 11
         if position == "bottom_right":
-            return fitz.Point(rect.width - margin_x, rect.height - margin_y)
+            return (w - margin, margin, 2)
         if position == "bottom_left":
-            return fitz.Point(margin_x, rect.height - margin_y)
+            return (margin, margin, 0)
         if position == "top_right":
-            return fitz.Point(rect.width - margin_x, margin_y)
+            return (w - margin, h - margin, 2)
         if position == "top_left":
-            return fitz.Point(margin_x, margin_y)
+            return (margin, h - margin, 0)
         if position == "top_center":
-            return fitz.Point(rect.width / 2, margin_y)
-        # bottom_center default
-        return fitz.Point(rect.width / 2, rect.height - margin_y)
+            return (w / 2.0, h - margin, 1)
+        return (w / 2.0, margin, 1)
 
-    for i, page in enumerate(doc, start=0):
-        rect = page.rect
-        p = _pos(rect)
+    for i, page in enumerate(reader.pages, start=0):
+        mb = page.mediabox
+        w = float(mb.width)
+        h = float(mb.height)
+        x, y, align = _coords(w, h)
         number = start_at + i
-        # Use textbox so centering works nicely
-        w = rect.width * 0.6
-        h = 20
-        box = fitz.Rect(p.x - w / 2, p.y - h / 2, p.x + w / 2, p.y + h / 2)
 
-        shape = page.new_shape()
-        shape.insert_textbox(box, str(number), fontsize=11, fontname="helv", align=1)
-        shape.finish(color=(0, 0, 0))
-        shape.commit(overlay=True)
+        buf = io.BytesIO()
+        c = canvas.Canvas(buf, pagesize=(w, h))
+        c.setFont("Helvetica", 11)
+        c.setFillColorRGB(0, 0, 0)
+        s = str(number)
+        if align == 1:
+            c.drawCentredString(x, y, s)
+        elif align == 2:
+            c.drawRightString(x, y, s)
+        else:
+            c.drawString(x, y, s)
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        overlay_page = PdfReader(buf).pages[0]
+        try:
+            page.merge_page(overlay_page)
+        except Exception:
+            page.mergePage(overlay_page)  # type: ignore
+        writer.add_page(page)
 
     output_path = get_output_path(output_name)
-    doc.save(output_path)
+    with open(output_path, "wb") as f:
+        writer.write(f)
+    return output_name
+
+
+def flatten_pdf(file_name: str, output_name: str = "flattened_output.pdf") -> str:
+    """Flatten/sanitize a PDF structure (low-RAM optimization).
+
+    This does NOT rasterize pages (so it preserves text selectability).
+    It rewrites the file with cleanup and compression.
+    """
+    ensure_temp_dirs()
+    input_path = get_upload_path(file_name)
+    if not os.path.exists(input_path):
+        raise FileNotFoundError(f"File not found: {file_name}")
+
+    try:
+        doc = fitz.open(input_path)
+        output_path = get_output_path(output_name)
+        doc.save(output_path, garbage=4, deflate=True, clean=True)
+        doc.close()
+        return output_name
+    except Exception as e:
+        raise Exception(f"Flatten failed: {e}")
+
+
+def remove_blank_pages(
+    file_name: str,
+    output_name: str = "no_blank_pages.pdf",
+    blank_ratio_threshold: float = 0.002,
+    zoom: float = 0.15,
+) -> str:
+    """Remove blank/empty pages using low-res thumbnail ink detection.
+
+    Designed for free tier: per-page low-res render, modest accuracy.
+    """
+    ensure_temp_dirs()
+    input_path = get_upload_path(file_name)
+    if not os.path.exists(input_path):
+        raise FileNotFoundError(f"File not found: {file_name}")
+
+    try:
+        import numpy as np  # type: ignore
+    except Exception:
+        raise Exception("remove_blank_pages requires numpy (already in requirements).")
+
+    doc = fitz.open(input_path)
+    reader = PdfReader(input_path)
+    writer = PdfWriter()
+
+    kept = 0
+    for idx in range(doc.page_count):
+        page = doc.load_page(idx)
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
+        img = np.frombuffer(pix.samples, dtype=np.uint8)
+        if img.size == 0:
+            continue
+        # Count non-white pixels
+        nonwhite = np.count_nonzero(img < 245)
+        ratio = nonwhite / float(img.size)
+        if ratio >= float(blank_ratio_threshold):
+            writer.add_page(reader.pages[idx])
+            kept += 1
+
     doc.close()
+
+    if kept == 0:
+        raise Exception("All pages were detected as blank. If this is wrong, try again with a different file.")
+
+    output_path = get_output_path(output_name)
+    with open(output_path, "wb") as f:
+        writer.write(f)
+    return output_name
+
+
+def remove_duplicate_pages(
+    file_name: str,
+    output_name: str = "no_duplicate_pages.pdf",
+    zoom: float = 0.12,
+) -> str:
+    """Remove duplicate pages using small thumbnail hashing.
+
+    Fast + medium accuracy on scanned/image-heavy PDFs.
+    """
+    ensure_temp_dirs()
+    input_path = get_upload_path(file_name)
+    if not os.path.exists(input_path):
+        raise FileNotFoundError(f"File not found: {file_name}")
+
+    doc = fitz.open(input_path)
+    reader = PdfReader(input_path)
+    writer = PdfWriter()
+
+    seen: set[str] = set()
+    kept = 0
+
+    for idx in range(doc.page_count):
+        page = doc.load_page(idx)
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
+        digest = hashlib.sha1(pix.samples).hexdigest()
+        if digest in seen:
+            continue
+        seen.add(digest)
+        writer.add_page(reader.pages[idx])
+        kept += 1
+
+    doc.close()
+
+    if kept == 0:
+        raise Exception("No pages kept after duplicate removal.")
+
+    output_path = get_output_path(output_name)
+    with open(output_path, "wb") as f:
+        writer.write(f)
+    return output_name
+
+
+def enhance_scan(
+    file_name: str,
+    output_name: str = "enhanced_scan.pdf",
+    dpi: int = 150,
+    max_pages: int = 25,
+) -> str:
+    """Enhance a scanned PDF for readability using OpenCV (thresholding).
+
+    This is image-based and will typically make text NON-selectable.
+    Uses conservative DPI and page limits to stay within 512MB.
+    """
+    ensure_temp_dirs()
+    input_path = get_upload_path(file_name)
+    if not os.path.exists(input_path):
+        raise FileNotFoundError(f"File not found: {file_name}")
+
+    try:
+        import numpy as np  # type: ignore
+        import cv2  # type: ignore
+    except Exception:
+        raise Exception(
+            "enhance_scan requires opencv-python-headless and numpy (already in requirements)."
+        )
+
+    doc = fitz.open(input_path)
+    if doc.page_count > int(max_pages):
+        doc.close()
+        raise Exception(
+            f"Enhance scan is limited to {max_pages} pages on the free tier to avoid memory spikes. "
+            "Please split the PDF first and try again."
+        )
+
+    out = fitz.open()
+
+    # scale matrix for desired DPI (PDF default 72 dpi)
+    scale = max(1.0, float(dpi) / 72.0)
+    mat = fitz.Matrix(scale, scale)
+
+    for idx in range(doc.page_count):
+        page = doc.load_page(idx)
+        pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+        img = np.frombuffer(pix.samples, dtype=np.uint8)
+        img = img.reshape((pix.height, pix.width, 3))
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        gray = cv2.medianBlur(gray, 3)
+        bw = cv2.adaptiveThreshold(
+            gray,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            31,
+            10,
+        )
+
+        # Encode to JPEG to keep PDF size reasonable
+        ok, jpg = cv2.imencode(".jpg", bw, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if not ok:
+            raise Exception("Scan enhancement failed during JPEG encoding.")
+        jpg_bytes = jpg.tobytes()
+
+        # Create a page matching image size (in points)
+        w_pt = pix.width * (72.0 / float(dpi))
+        h_pt = pix.height * (72.0 / float(dpi))
+        out_page = out.new_page(width=w_pt, height=h_pt)
+        out_page.insert_image(out_page.rect, stream=jpg_bytes)
+
+    doc.close()
+    output_path = get_output_path(output_name)
+    out.save(output_path, garbage=4, deflate=True)
+    out.close()
     return output_name
 
 
@@ -778,28 +1154,93 @@ def ocr_pdf(
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"File not found: {file_name}")
 
-    try:
-        import ocrmypdf  # type: ignore
-    except Exception:
+    # Use the CLI to enforce timeouts and to avoid excessive in-process memory.
+    ocrmypdf_cmd = shutil.which("ocrmypdf")
+    if not ocrmypdf_cmd:
         raise Exception(
             "OCR requires the optional dependency 'ocrmypdf' and a Tesseract install. "
             "Install with: pip install ocrmypdf  (and install Tesseract on your system)."
         )
 
+    # Free-tier safe defaults
+    default_dpi = 200
+    chunk_pages = 25
+
+    reader = PdfReader(input_path)
+    total_pages = len(reader.pages)
+
+    def _run_ocr(in_pdf: str, out_pdf: str, timeout_s: int) -> None:
+        cmd = [
+            ocrmypdf_cmd,
+            "--skip-text",
+            "--jobs",
+            "1",
+            "--image-dpi",
+            str(default_dpi),
+            "--tesseract-timeout",
+            "120",
+        ]
+        if language:
+            cmd += ["-l", str(language)]
+        if deskew:
+            cmd += ["--deskew"]
+        cmd += [in_pdf, out_pdf]
+        try:
+            subprocess.run(cmd, check=True, timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            raise Exception("OCR timed out. Try splitting the PDF or using fewer pages.")
+
     output_path = get_output_path(output_name)
 
-    # ocrmypdf may raise detailed exceptions; bubble up with context
+    # Chunking to avoid memory spikes on long PDFs
+    if total_pages > chunk_pages:
+        temp_outputs: list[str] = []
+        try:
+            for start in range(0, total_pages, chunk_pages):
+                end = min(total_pages, start + chunk_pages)
+                chunk_in = get_output_path(f"_ocr_chunk_in_{start+1}_{end}.pdf")
+                chunk_out = get_output_path(f"_ocr_chunk_out_{start+1}_{end}.pdf")
+
+                w = PdfWriter()
+                for i in range(start, end):
+                    w.add_page(reader.pages[i])
+                with open(chunk_in, "wb") as f:
+                    w.write(f)
+
+                # Timeout scales mildly with pages
+                timeout_s = 180 + (end - start) * 20
+                _run_ocr(chunk_in, chunk_out, timeout_s=timeout_s)
+                temp_outputs.append(chunk_out)
+
+            # Merge chunks
+            merged = PdfWriter()
+            for p in temp_outputs:
+                r = PdfReader(p)
+                for pg in r.pages:
+                    merged.add_page(pg)
+            with open(output_path, "wb") as f:
+                merged.write(f)
+        except Exception as e:
+            raise Exception(f"OCR failed: {e}")
+        finally:
+            # Cleanup temp files
+            try:
+                for start in range(0, total_pages, chunk_pages):
+                    end = min(total_pages, start + chunk_pages)
+                    chunk_in = get_output_path(f"_ocr_chunk_in_{start+1}_{end}.pdf")
+                    if os.path.exists(chunk_in):
+                        os.remove(chunk_in)
+                for p in temp_outputs:
+                    if os.path.exists(p):
+                        os.remove(p)
+            except Exception:
+                pass
+
+        return output_name
+
+    # Single shot
     try:
-        ocrmypdf.ocr(
-            input_path,
-            output_path,
-            language=language or "eng",
-            deskew=bool(deskew),
-            skip_text=True,  # Skip pages that already have text (don't force re-OCR)
-            output_type="pdf",
-            progress_bar=False,
-        )
+        _run_ocr(input_path, output_path, timeout_s=240 + total_pages * 20)
     except Exception as e:
         raise Exception(f"OCR failed: {e}")
-
     return output_name
