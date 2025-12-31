@@ -1508,6 +1508,11 @@ export default function App() {
     return { label: "—", className: "text-slate-500" };
   }, [ramStats]);
 
+  const ramPillText = useMemo(() => {
+    if (ramStats?.rss_mb == null) return null;
+    return `RAM ${ramStats.rss_mb}MB`;
+  }, [ramStats]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
       <div className="cursor-glow" aria-hidden="true" />
@@ -1595,15 +1600,10 @@ export default function App() {
 
               {/* Live RAM indicator (mobile). No ETA here; chat already shows it. */}
               {loading && ramStats?.rss_mb != null ? (
-                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-300">
-                  <div className="flex items-center gap-2">
-                    <span className={cn(ramIndicator.className)}>{Icons.circle}</span>
-                    <span className="text-slate-200">RAM</span>
-                    <span className="text-slate-400">{ramStats.rss_mb}MB</span>
-                  </div>
-                  {ramStats?.avail_mb != null ? (
-                    <div className="text-slate-400">Free {ramStats.avail_mb}MB</div>
-                  ) : null}
+                <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-300">
+                  <span className={cn(ramIndicator.className)}>{Icons.circle}</span>
+                  <span className="text-slate-200">RAM</span>
+                  <span className="text-slate-400">{ramStats.rss_mb}MB</span>
                 </div>
               ) : null}
             </div>
@@ -1626,6 +1626,14 @@ export default function App() {
                   <span className="text-slate-400">{Icons.copy}</span>
                   {fileBadge}
                 </span>
+
+                {loading && ramPillText ? (
+                  <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] text-slate-300 flex items-center gap-1.5">
+                    <span className={cn(ramIndicator.className)}>{Icons.circle}</span>
+                    <span className="text-slate-200">{ramPillText}</span>
+                  </span>
+                ) : null}
+
                 <span
                   className={cn(
                     "rounded-full border px-3 py-1 text-[11px] flex items-center gap-1.5",
@@ -2104,7 +2112,7 @@ export default function App() {
                 <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">
                   <div className="text-[11px] text-slate-400 flex items-center gap-1">
                     <span className="text-slate-500">{Icons.bolt}</span>
-                    RAM (live)
+                    RAM usage
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={cn(ramIndicator.className)}>{Icons.circle}</span>
@@ -2113,12 +2121,6 @@ export default function App() {
                     <span className="text-slate-400">
                       {ramStats?.rss_mb != null ? `${ramStats.rss_mb}MB` : "—"}
                     </span>
-                    {ramStats?.avail_mb != null ? (
-                      <>
-                        <span className="text-slate-500">•</span>
-                        <span className="text-slate-400">Free {ramStats.avail_mb}MB</span>
-                      </>
-                    ) : null}
                   </div>
                 </div>
                 {loading && (
