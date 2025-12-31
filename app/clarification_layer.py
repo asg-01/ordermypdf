@@ -44,6 +44,60 @@ from app.models import (
 from app.pdf_operations import get_upload_path
 
 
+UNSUPPORTED_REPLY = "Not supported yet or sooner"
+
+
+def _is_explicitly_unsupported_request(prompt: str) -> bool:
+    """Return True if the user is clearly requesting a currently unsupported feature.
+
+    Corpus rule: if unsupported, reply exactly with UNSUPPORTED_REPLY.
+    Keep this conservative to avoid false positives.
+    """
+    p = (prompt or "").lower()
+    if not p:
+        return False
+
+    wants_convert = bool(re.search(r"\b(convert|change|export)\b", p))
+
+    # Unsupported conversions / formats.
+    if wants_convert and re.search(r"\b(pptx?|powerpoint)\b", p):
+        return True
+    if wants_convert and re.search(r"\b(xlsx?|xls|excel|csv)\b", p):
+        return True
+    if wants_convert and re.search(r"\bhtml?\b", p):
+        return True
+
+    # Unsupported security / signing workflows.
+    if re.search(r"\b(password|encrypt|decrypt|unlock|protect)\b", p):
+        return True
+    if re.search(r"\b(sign|signature|e-?sign)\b", p):
+        return True
+
+    # Unsupported edits that imply authoring/annotation.
+    if re.search(r"\b(edit|annotate|highlight)\b", p) and "pdf" in p:
+        return True
+
+    return False
+
+
+def _is_likely_unsupported_validation_error(error_msg: str) -> bool:
+    """Heuristic: identify Pydantic/validation failures that indicate an unsupported operation."""
+    e = (error_msg or "").lower()
+    if not e:
+        return False
+
+    # Most common: invalid literal for operation_type.
+    if "operation_type" in e and (
+        "input should be" in e
+        or "literal" in e
+        or "unexpected value" in e
+        or "validation error" in e
+    ):
+        return True
+
+    return False
+
+
 def _parse_page_ranges(text: str) -> list[int]:
     """Parse '2,4-6' style page ranges into a sorted unique list of ints."""
     if not text:
@@ -252,15 +306,21 @@ def _fix_common_connector_typos(text: str) -> str:
         return text
     s = text
     s = re.sub(r"\badn\b", "and", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bn\b", "and", s, flags=re.IGNORECASE)
     s = re.sub(r"\bthne\b", "then", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bthn\b", "then", s, flags=re.IGNORECASE)
 
     # Common action typos seen in the training corpus.
     # Keep this conservative: only fix full-word matches.
     s = re.sub(r"\bcompres\b", "compress", s, flags=re.IGNORECASE)
     s = re.sub(r"\bcomprss\b", "compress", s, flags=re.IGNORECASE)
     s = re.sub(r"\bsplt\b", "split", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bspllit\b", "split", s, flags=re.IGNORECASE)
     s = re.sub(r"\bmerg\b", "merge", s, flags=re.IGNORECASE)
     s = re.sub(r"\bconver\b", "convert", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bcnvert\b", "convert", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bcnvrt\b", "convert", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bconvrt\b", "convert", s, flags=re.IGNORECASE)
     return s
 
 
@@ -696,6 +756,11 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
     prompt_for_match = _normalize_prompt_for_heuristics(user_prompt)
     prompt_compact = prompt_for_match.strip().lower()
 
+    # Corpus-required strict behavior: if the user clearly requests an unsupported feature,
+    # reply exactly with UNSUPPORTED_REPLY.
+    if _is_explicitly_unsupported_request(prompt_for_match):
+        return ClarificationResult(clarification=UNSUPPORTED_REPLY)
+
     # Deterministic convert shortcuts for common ambiguous phrasing.
     # These improve reliability (and reduce LLM calls) for corpus-style commands.
     if file_names:
@@ -947,6 +1012,10 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
                 print(f"[AI] Requesting clarification: {clarification}")
                 return ClarificationResult(clarification=clarification, options=options)
 
+            # If LLM returned an unsupported op schema, enforce corpus reply.
+            if _is_likely_unsupported_validation_error(error_msg) or _is_explicitly_unsupported_request(prompt_for_match):
+                return ClarificationResult(clarification=UNSUPPORTED_REPLY)
+
             # Non-clarification failure: fall back to deterministic 2-step parsing
             # so common clickable options like "rotate 90 degrees and then compress" still work.
             # Broader deterministic fallback for 2+ steps.
@@ -1107,6 +1176,11 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
                 options = _options_for_common_questions(clarification, user_prompt)
             print(f"[AI] Requesting clarification: {clarification}")
             return ClarificationResult(clarification=clarification, options=options)
+
+        # If the request is for an unsupported feature (or the LLM produced an unsupported op),
+        # enforce the corpus rule.
+        if _is_likely_unsupported_validation_error(error_msg) or _is_explicitly_unsupported_request(prompt_for_match):
+            return ClarificationResult(clarification=UNSUPPORTED_REPLY)
         
         # If AI parser fails for other reasons, show helpful examples
         clarification = (
