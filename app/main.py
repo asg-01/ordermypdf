@@ -4,8 +4,13 @@ FastAPI Main Application - Orchestrates AI parsing and PDF processing.
 This is where the magic happens:
 1. User sends prompt + files
 2. AI parses intent → JSON
-3. Backend validates and executes
+3. Backend validates and executes using error handlers and guards
 4. Returns processed PDF
+
+INTEGRATION WITH NEW MODULES:
+- error_handler.py: Classify and handle errors gracefully
+- file_type_guards.py: Validate operations against file types
+- pipeline_definitions.py: Optimize operation ordering
 """
 
 import os
@@ -23,6 +28,8 @@ import re
 
 from app.config import settings
 from app.models import ProcessResponse, ParsedIntent
+from app.error_handler import ErrorClassifier, ErrorType
+from app.pipeline_definitions import PipelineRegistry
 from app.pdf_operations import (
     merge_pdfs,
     split_pdf,
@@ -51,6 +58,11 @@ from app.pdf_operations import (
 from app.clarification_layer import clarify_intent
 from app.utils import normalize_whitespace, fuzzy_match_string, RE_EXPLICIT_ORDER, RE_ROTATE_DEGREES, RE_COMPRESS_SIZE
 from app.job_queue import job_queue, JobStatus
+
+
+# Initialize error handler and pipeline registry
+error_classifier = ErrorClassifier()
+pipeline_registry = PipelineRegistry()
 
 
 _ETA_LOCK = Lock()
@@ -393,6 +405,86 @@ def _normalize_ws(s: str) -> str:
     """Normalize whitespace and lowercase for comparison."""
     return " ".join((s or "").split()).lower().strip()
 
+
+def _check_file_type_guards(intent: ParsedIntent | list[ParsedIntent], file_names: list[str]) -> tuple[bool, str]:
+    """
+    Check file-type guards and redundancy checks using file_type_guards module.
+    
+    Returns:
+        tuple: (is_allowed, message) where is_allowed indicates if operation should proceed
+        
+    Per spec: Never throw generic errors. Instead:
+    - Return False if operation is redundant (skip silently)
+    - Return False if operation is incompatible (block with user message)
+    """
+    from app.file_type_guards import get_file_type, check_all_guards, FileType, GuardAction
+    
+    intents = intent if isinstance(intent, list) else [intent]
+    
+    for it in intents:
+        if not file_names:
+            continue
+            
+        primary_file = file_names[0]
+        op_type = it.operation_type
+        
+        # Get file type using proper function
+        file_type = get_file_type(primary_file)
+        if file_type is None:
+            # Unknown file type - let it proceed
+            continue
+        
+        # Run all guards (redundancy + compatibility)
+        guard_result = check_all_guards(
+            operation=op_type,
+            current_type=file_type,
+            filename=primary_file,
+            page_count=0,  # Unknown, default to 0
+        )
+        
+        if guard_result:
+            if guard_result.action == GuardAction.SKIP:
+                # Redundant operation - skip silently
+                return False, ""
+            elif guard_result.action == GuardAction.BLOCK:
+                # Incompatible operation - block with message
+                return False, guard_result.message
+    
+    return True, ""
+
+
+def _optimize_operation_order(intents: list[ParsedIntent]) -> list[ParsedIntent]:
+    """
+    Use pipeline definitions to find optimal operation ordering.
+    
+    If a matching pipeline is found, returns operations in optimal order.
+    Otherwise, returns intents in original order.
+    """
+    if len(intents) <= 1:
+        return intents
+    
+    # Extract operation types for pipeline matching
+    op_types = [it.operation_type for it in intents]
+    
+    try:
+        # Try to find a matching pipeline
+        pipeline = pipeline_registry.find_pipeline(op_types)
+        if pipeline:
+            # Reorder intents according to pipeline
+            ordered = {}
+            for op in pipeline.operations:
+                for intent in intents:
+                    if intent.operation_type == op:
+                        ordered[op] = intent
+                        break
+            
+            # Return in pipeline order
+            return [ordered[op] for op in pipeline.operations if op in ordered]
+    except Exception:
+        # Silently fall back to original order on any error
+        pass
+    
+    return intents
 
 def _resolve_uploaded_filename(requested: str, uploaded_files: list[str]) -> str:
     """Resolve a potentially mistyped filename to one of the uploaded filenames.
@@ -741,9 +833,28 @@ def execute_operation(intent: ParsedIntent) -> tuple[str, str]:
 
 
 def execute_operation_pipeline(intents: list[ParsedIntent], uploaded_files: list[str]) -> tuple[str, str]:
-    """Execute multiple intents sequentially, feeding output of one into the next."""
+    """
+    Execute multiple intents sequentially, feeding output of one into the next.
+    
+    INTEGRATION POINTS:
+    1. _check_file_type_guards: Validate operations against file types
+    2. _optimize_operation_order: Reorder operations using pipeline definitions
+    3. error_classifier: Handle execution errors gracefully
+    """
     if not intents:
         raise ValueError("No operations provided")
+
+    # Check guards before execution
+    is_allowed, guard_msg = _check_file_type_guards(intents, uploaded_files)
+    if not is_allowed:
+        if guard_msg:
+            raise ValueError(guard_msg)
+        else:
+            # Operation is redundant, skip silently
+            return uploaded_files[0], "Operation skipped (redundant)"
+    
+    # Optimize operation order using pipeline definitions
+    intents = _optimize_operation_order(intents)
 
     current_file: str | None = None
     messages: list[str] = []
