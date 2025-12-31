@@ -54,27 +54,6 @@ def _sanitize_text_for_xml(text: str) -> str:
     return ''.join(result)
 
 
-def _is_xml_encoding_error(error: Exception) -> bool:
-    """
-    Detect if an error is related to XML/Unicode/NULL byte issues.
-    
-    These errors indicate corrupted text layers that can be recovered via OCR.
-    """
-    error_str = str(error).lower()
-    xml_error_patterns = [
-        "xml compatible",
-        "null byte",
-        "control character",
-        "unicode",
-        "encoding",
-        "codec",
-        "charmap",
-        "surrogates not allowed",
-        "invalid character",
-    ]
-    return any(pattern in error_str for pattern in xml_error_patterns)
-
-
 def ensure_temp_dirs():
     """Create temporary directories if they don't exist"""
     Path("uploads").mkdir(exist_ok=True)
@@ -451,21 +430,13 @@ def pdf_to_docx(file_name: str, output_name: str = "converted_output.docx") -> s
 
     try_pdf2docx = bool(size_mb and size_mb <= 15 and page_count and page_count <= 30)
 
-    # Track if we need OCR fallback for XML/encoding errors
-    xml_error_encountered = False
-    last_error = None
-
     if try_pdf2docx:
         try:
             cv = Converter(input_path)
             cv.convert(output_path, start=0, end=None)
             cv.close()
             return output_name
-        except Exception as e:
-            # Check if this is an XML/encoding error that needs OCR fallback
-            if _is_xml_encoding_error(e):
-                xml_error_encountered = True
-                last_error = e
+        except Exception:
             # Fall back to low-RAM layout mode
             try:
                 try:
@@ -475,113 +446,10 @@ def pdf_to_docx(file_name: str, output_name: str = "converted_output.docx") -> s
             except Exception:
                 pass
 
-    # Try low-RAM layout method
-    if not xml_error_encountered:
-        try:
-            _low_ram_layout_docx()
-            return output_name
-        except Exception as e:
-            if _is_xml_encoding_error(e):
-                xml_error_encountered = True
-                last_error = e
-            else:
-                # User-friendly message per spec - don't expose technical details
-                raise Exception("Could not convert this PDF to Word. The file may be corrupted or have an unusual format.")
-
-    # ============================================
-    # OCR FALLBACK for XML/Unicode/NULL byte errors
-    # Per spec: PDF → OCR (force) → Convert to DOCX
-    # ============================================
-    if xml_error_encountered:
-        print(f"[DOCX] XML/encoding error detected, attempting OCR fallback...")
-        try:
-            # Step 1: OCR the PDF to get clean text
-            ocr_temp_name = f"_ocr_temp_{os.path.basename(file_name)}"
-            ocr_output = ocr_pdf(file_name, language="eng", deskew=True, output_name=ocr_temp_name)
-            
-            # Step 2: Try conversion again with OCR'd PDF
-            try:
-                # Try pdf2docx on OCR'd file first
-                ocr_path = get_output_path(ocr_output)
-                cv = Converter(ocr_path)
-                cv.convert(output_path, start=0, end=None)
-                cv.close()
-                # Cleanup OCR temp file
-                try:
-                    os.remove(ocr_path)
-                except Exception:
-                    pass
-                return output_name
-            except Exception:
-                try:
-                    cv.close()
-                except Exception:
-                    pass
-                
-                # Final attempt: low-RAM layout on OCR'd file
-                # Temporarily swap input path for the nested function
-                original_input = input_path
-                try:
-                    # Re-run layout DOCX with OCR'd file as source
-                    pdf = fitz.open(get_output_path(ocr_output))
-                    from docx import Document
-                    from docx.shared import Pt
-                    from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-                    
-                    out = Document()
-                    style = out.styles["Normal"]
-                    style.font.name = "Calibri"
-                    style.font.size = Pt(11)
-
-                    for page_index in range(pdf.page_count):
-                        page = pdf.load_page(page_index)
-                        page_dict = page.get_text("dict")
-                        blocks = page_dict.get("blocks", []) if isinstance(page_dict, dict) else []
-                        
-                        for block in blocks:
-                            if not isinstance(block, dict) or block.get("type") != 0:
-                                continue
-                            p = out.add_paragraph()
-                            lines = block.get("lines", [])
-                            for line in lines:
-                                spans = line.get("spans", []) if isinstance(line, dict) else []
-                                for span in spans:
-                                    if not isinstance(span, dict):
-                                        continue
-                                    text = span.get("text") or ""
-                                    if text:
-                                        text = _sanitize_text_for_xml(text)
-                                        if text:
-                                            run = p.add_run(text)
-
-                        if page_index != pdf.page_count - 1:
-                            out.add_page_break()
-
-                    pdf.close()
-                    out.save(output_path)
-                    
-                    # Cleanup OCR temp file
-                    try:
-                        os.remove(get_output_path(ocr_output))
-                    except Exception:
-                        pass
-                    return output_name
-                except Exception as final_e:
-                    # Cleanup on failure
-                    try:
-                        os.remove(get_output_path(ocr_output))
-                    except Exception:
-                        pass
-                    raise final_e
-                    
-        except Exception as ocr_e:
-            # OCR fallback failed - provide user-friendly message per spec
-            raise Exception(
-                "This file can't be converted cleanly to Word. "
-                "The text layer contains characters that aren't compatible. "
-                "Try using OCR first, or request a searchable PDF instead."
-            )
-
+    try:
+        _low_ram_layout_docx()
+    except Exception as e:
+        raise Exception(f"PDF to DOCX conversion failed: {e}")
     return output_name
 
 
@@ -687,8 +555,7 @@ def docx_to_pdf(file_name: str, output_name: str = "converted_output.pdf") -> st
     except subprocess.TimeoutExpired:
         raise Exception("DOCX → PDF conversion timed out.")
     except Exception as e:
-        # User-friendly message per spec
-        raise Exception("Could not convert this document to PDF. Please check if the file is valid.")
+        raise Exception(f"DOCX → PDF conversion failed: {e}")
 
     base = os.path.splitext(os.path.basename(file_name))[0]
     produced = os.path.join(out_dir, f"{base}.pdf")
@@ -1033,8 +900,7 @@ def flatten_pdf(file_name: str, output_name: str = "flattened_output.pdf") -> st
         doc.close()
         return output_name
     except Exception as e:
-        # User-friendly message per spec - don't expose technical details
-        raise Exception("Could not flatten this PDF. The file may be corrupted or protected.")
+        raise Exception(f"Flatten failed: {e}")
 
 
 def remove_blank_pages(
