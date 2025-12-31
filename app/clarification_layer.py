@@ -47,6 +47,82 @@ from app.pdf_operations import get_upload_path
 UNSUPPORTED_REPLY = "Not supported yet or sooner"
 
 
+def _is_short_followup(prompt: str) -> bool:
+    """Check if this is a short follow-up command (≤5 tokens, likely depends on context)."""
+    tokens = prompt.strip().split()
+    return len(tokens) <= 5
+
+
+def _rephrase_with_context(user_prompt: str, last_intent: Union['ParsedIntent', list['ParsedIntent'], None], file_names: list[str]) -> str | None:
+    """
+    LLM-based rephrasing: use prior session context to expand short/ambiguous follow-ups.
+    
+    Returns a rephrased prompt if successful, or None if rephrasing is not needed/failed.
+    Only used for short follow-ups to avoid unnecessary LLM calls.
+    """
+    if not _is_short_followup(user_prompt):
+        return None
+    
+    if last_intent is None:
+        return None
+    
+    # Infer what the last operation was
+    last_op = None
+    if isinstance(last_intent, list) and last_intent:
+        last_op = getattr(last_intent[-1], 'operation_type', None)
+    elif isinstance(last_intent, ParsedIntent):
+        last_op = getattr(last_intent, 'operation_type', None)
+    
+    if not last_op:
+        return None
+    
+    # Map operation to human-readable description
+    op_descriptions = {
+        'compress': 'compressed the PDF',
+        'compress_to_target': 'compressed the PDF to a target size',
+        'merge': 'merged the PDFs',
+        'split': 'split the PDF',
+        'rotate': 'rotated the PDF',
+        'delete_pages': 'deleted pages from the PDF',
+        'keep_pages': 'extracted specific pages',
+        'extract_pages': 'extracted pages from the PDF',
+        'ocr': 'ran OCR on the document',
+        'pdf_to_docx': 'converted the PDF to DOCX',
+        'docx_to_pdf': 'converted the DOCX to PDF',
+        'pdf_to_images': 'converted the PDF to images',
+    }
+    
+    last_action = op_descriptions.get(last_op, f"performed '{last_op}' on the file")
+    
+    # Common short follow-ups and their likely intentions
+    prompt_lower = user_prompt.lower().strip()
+    
+    # "to docx" → "convert to docx" or "convert [result] to docx"
+    if prompt_lower in ('to docx', 'as docx', 'to word', 'as word', 'docx', 'word'):
+        return f"convert the result to docx"
+    
+    # "to pdf" → "convert to pdf"
+    if prompt_lower in ('to pdf', 'as pdf', 'pdf'):
+        return f"convert the result to pdf"
+    
+    # "to png/jpg" → "convert to images"
+    if prompt_lower in ('to png', 'as png', 'png', 'to jpg', 'to jpeg', 'as jpg', 'jpg', 'jpeg'):
+        fmt = 'png' if 'png' in prompt_lower else 'jpg'
+        return f"convert the result to {fmt} images"
+    
+    # "compress" / "smaller" / "make smaller" after prior operation
+    if re.search(r'\b(compress|smaller|reduce|shrink)\b', prompt_lower):
+        if last_op not in ('compress', 'compress_to_target'):
+            return f"compress the result"
+    
+    # "merge" / "combine" intent
+    if re.search(r'\b(merge|combine|together)\b', prompt_lower) and last_op not in ('merge',):
+        return f"merge all the files together"
+    
+    # Generic fallback: if we can't infer, don't rephrase
+    return None
+
+
 def _is_explicitly_unsupported_request(prompt: str) -> bool:
     """Return True if the user is clearly requesting a currently unsupported feature.
 

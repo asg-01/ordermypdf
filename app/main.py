@@ -1037,7 +1037,16 @@ def process_job_background(job_id: str):
 
             job_queue.update_progress(job_id, 20, "Understanding your request...")
             
+            # Stage 1: Try direct parse first
             clarification_result = clarify_intent(prompt_to_parse, file_names, last_question=effective_question)
+            
+            # Stage 2: If no intent but it's a short follow-up, try rephrasing with session context
+            if not clarification_result.intent and clarification_result.clarification and session:
+                from app.clarification_layer import _rephrase_with_context
+                rephrased = _rephrase_with_context(prompt_to_parse, session.last_success_intent, file_names)
+                if rephrased:
+                    print(f"[JOB {job_id}] Rephrased '{prompt_to_parse}' → '{rephrased}'")
+                    clarification_result = clarify_intent(rephrased, file_names, last_question=effective_question)
             
             if clarification_result.intent:
                 intent = clarification_result.intent
@@ -1646,6 +1655,15 @@ async def process_pdfs(
                         )
 
             clarification_result = clarify_intent(prompt_to_parse, file_names, last_question=effective_question)
+            
+            # Stage 2: If no intent but it's a short follow-up, try rephrasing with session context
+            if not clarification_result.intent and clarification_result.clarification and session:
+                from app.clarification_layer import _rephrase_with_context
+                rephrased = _rephrase_with_context(prompt_to_parse, session.last_success_intent, file_names)
+                if rephrased:
+                    print(f"[AI] Rephrased '{prompt_to_parse}' → '{rephrased}'")
+                    clarification_result = clarify_intent(rephrased, file_names, last_question=effective_question)
+            
             if clarification_result.intent:
                 intent = clarification_result.intent
                 if isinstance(intent, list):
