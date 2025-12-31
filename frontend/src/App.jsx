@@ -602,6 +602,8 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false); // true during upload, false during processing
   const [processingMessage, setProcessingMessage] = useState("");
   const currentJobIdRef = useRef(null);
+  const [lastSubmittedPrompt, setLastSubmittedPrompt] = useState("");
+  const [fileAttention, setFileAttention] = useState(false);
   
   // Track uploaded files to avoid re-uploading
   const [uploadedFileNames, setUploadedFileNames] = useState([]); // file names on server
@@ -936,13 +938,41 @@ export default function App() {
 
   // Handle file selection
   const handleFileChange = (e) => {
-    const selected = Array.from(e.target.files || []);
-    setFiles(selected);
-    setLastFileName(selected.length ? selected[selected.length - 1].name : "");
+    const incoming = Array.from(e.target.files || []);
+
+    // Allow re-selecting the same file(s) later.
+    try {
+      e.target.value = "";
+    } catch {
+      // ignore
+    }
+
+    if (!incoming.length) return;
+
+    // Deduplicate by name+size to avoid accidental duplicates.
+    const keyOf = (f) => `${f?.name || ""}::${f?.size || 0}`;
+    const existingKeys = new Set(files.map(keyOf));
+    const dedupedIncoming = incoming.filter((f) => !existingKeys.has(keyOf(f)));
+
+    // Enforce max file count (25)
+    const MAX_FILES = 25;
+    const room = Math.max(0, MAX_FILES - files.length);
+    let accepted = dedupedIncoming;
+    if (dedupedIncoming.length > room) {
+      accepted = dedupedIncoming.slice(0, room);
+      showToast("At once only 25 files allowed.", 4500);
+    }
+
+    // If no room, keep state unchanged.
+    if (!accepted.length) return;
+
+    const next = files.concat(accepted);
+    setFiles(next);
+    setLastFileName(accepted[accepted.length - 1].name);
 
     // Check if these are different files - reset uploaded state
-    const filesChanged = selected.length !== lastUploadedFiles.length ||
-      selected.some((f, i) => !lastUploadedFiles[i] || f.name !== lastUploadedFiles[i].name || f.size !== lastUploadedFiles[i].size);
+    const filesChanged = next.length !== lastUploadedFiles.length ||
+      next.some((f, i) => !lastUploadedFiles[i] || f.name !== lastUploadedFiles[i].name || f.size !== lastUploadedFiles[i].size);
     
     if (filesChanged) {
       setUploadedFileNames([]);
@@ -950,15 +980,25 @@ export default function App() {
     }
 
     // Show warning for large files (50MB+)
-    if (selected.length > 0) {
-      const totalSizeMB = getTotalFileSizeMB(selected);
-      if (totalSizeMB > 50) {
-        showToast(
-          `📁 Large file (${Math.round(totalSizeMB)}MB) — expect longer processing time`,
-          5000
-        );
-      }
+    const totalSizeMB = getTotalFileSizeMB(next);
+    const maxFileMB = Math.max(
+      0,
+      ...next.map((f) => (f?.size || 0) / (1024 * 1024))
+    );
+    if (totalSizeMB > 60 || maxFileMB > 60) {
+      showToast(
+        `Large upload (${Math.round(totalSizeMB)}MB total) — upload depends on your network speed.`,
+        6000
+      );
+    } else if (totalSizeMB > 50) {
+      showToast(
+        `Large upload (${Math.round(totalSizeMB)}MB total) — expect longer processing time.`,
+        5000
+      );
     }
+
+    // Clear any attention blink once files are added.
+    setFileAttention(false);
   };
 
   // Show toast notification
@@ -1019,6 +1059,9 @@ export default function App() {
   const submit = async (overrideText) => {
     if (!files.length) {
       setError("Please upload at least one file.");
+      showToast("Please add a file first.", 3500);
+      setFileAttention(true);
+      setTimeout(() => setFileAttention(false), 1200);
       return;
     }
     const rawInput = normalizeWhitespace(overrideText ?? prompt);
@@ -1027,16 +1070,7 @@ export default function App() {
       return;
     }
 
-    // Show warning for large files (>60MB)
     const totalSizeMB = getTotalFileSizeMB(files);
-    if (totalSizeMB > 60) {
-      showToast(
-        `⏳ Large file (${Math.round(
-          totalSizeMB
-        )}MB) — upload depends on your network speed.`,
-        6000
-      );
-    }
 
     // Calculate estimated processing time (shown after upload completes)
     const estTime = estimateWaitTime(totalSizeMB, rawInput);
@@ -1051,6 +1085,7 @@ export default function App() {
     setProcessingMessage("");
 
     const rawUserText = rawInput;
+    setLastSubmittedPrompt(rawUserText);
 
     // If user clicked a clarification option, treat it as the final instruction.
     const lastMsg = messages[messages.length - 1];
@@ -1449,6 +1484,21 @@ export default function App() {
     ? `${files.length} file${files.length === 1 ? "" : "s"}`
     : "No files";
 
+  const totalSelectedMB = useMemo(() => getTotalFileSizeMB(files), [files]);
+  const loadLevel = useMemo(() => {
+    const p = (lastSubmittedPrompt || prompt || "").toLowerCase();
+    const factor = /\bocr\b/.test(p) ? totalSelectedMB * 1.6 : totalSelectedMB;
+    if (factor >= 80) return "high";
+    if (factor >= 40) return "medium";
+    return "low";
+  }, [lastSubmittedPrompt, prompt, totalSelectedMB]);
+
+  const loadIndicator = useMemo(() => {
+    if (loadLevel === "high") return { label: "High", className: "text-rose-400" };
+    if (loadLevel === "medium") return { label: "Medium", className: "text-amber-300" };
+    return { label: "Low", className: "text-green-400" };
+  }, [loadLevel]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
       <div className="cursor-glow" aria-hidden="true" />
@@ -1497,7 +1547,45 @@ export default function App() {
           </div>
         </header>
 
-        <main className="grid gap-6 md:grid-cols-[1fr_18rem] place-items-center md:place-items-start">
+        <main className="grid gap-6 md:grid-cols-[1fr_18rem] items-start">
+          {/* Mobile Session (compact, above console) */}
+          <div className="md:hidden w-full">
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-slate-200 flex items-center gap-2">
+                    <span className="text-cyan-400/80">{Icons.clipboard}</span>
+                    Session
+                  </div>
+                  <div className="mt-1 text-[11px] text-slate-400 truncate">
+                    {files.length ? lastFileName || files[0]?.name : "No files selected"}
+                  </div>
+                </div>
+                <div className="shrink-0 flex items-center gap-2">
+                  <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] text-slate-300">
+                    {fileBadge}
+                  </span>
+                  <span className={cn(
+                    "rounded-full border px-3 py-1 text-[11px] flex items-center gap-1.5",
+                    loading ? "border-cyan-400/30 bg-cyan-400/10 text-cyan-200" : "border-white/10 bg-black/20 text-slate-300"
+                  )}>
+                    {loading ? (
+                      <>
+                        <span className="text-cyan-300">{Icons.spinner}</span>
+                        {isUploading ? "Uploading" : "Processing"}
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-green-400">{Icons.circle}</span>
+                        Ready
+                      </>
+                    )}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <section className="rounded-3xl border border-white/10 bg-white/5 shadow-[0_8px_40px_rgba(0,0,0,0.35)] w-full max-w-[95vw] md:max-w-none">
             <div className="flex items-center justify-between gap-4 border-b border-white/10 px-6 py-5">
               <div className="space-y-1">
@@ -1654,11 +1742,17 @@ export default function App() {
                       className={cn(
                         "group inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition",
                         "border-white/10 bg-white/5 hover:bg-white/10",
-                        "focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
+                        "focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60",
+                        fileAttention && "ring-2 ring-amber-300/60 animate-pulse"
                       )}
                     >
                       <span className="text-cyan-300/90">{Icons.folder}</span>
                       <span className="text-cyan-300/90">Choose files</span>
+                      {files.length ? (
+                        <span className="ml-1 inline-flex items-center justify-center rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-0.5 text-[11px] text-cyan-100">
+                          +
+                        </span>
+                      ) : null}
                     </button>
 
                     <div className="min-w-0">
@@ -1981,6 +2075,19 @@ export default function App() {
                         Idle
                       </>
                     )}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">
+                  <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                    <span className="text-slate-500">{Icons.bolt}</span>
+                    Load
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={cn(loadIndicator.className)}>{Icons.circle}</span>
+                    <span className="text-slate-200">{loadIndicator.label}</span>
+                    <span className="text-slate-500">•</span>
+                    <span className="text-slate-400">{Math.round(totalSelectedMB)}MB</span>
                   </div>
                 </div>
                 {loading && (
