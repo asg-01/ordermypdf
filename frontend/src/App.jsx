@@ -740,7 +740,13 @@ export default function App() {
           statusData.status
         );
         setProcessingMessage(statusText);
-        setRamStats(statusData.ram || null);
+        if (statusData.ram) {
+          console.log("[RAM DEBUG] Status RAM data:", statusData.ram);
+          setRamStats(statusData.ram);
+        } else {
+          console.warn("[RAM DEBUG] No ram field in statusData");
+          setRamStats(null);
+        }
 
         setMessages((prev) => {
           const trimmed = prev.filter((m) => m.tone !== "status");
@@ -1161,7 +1167,13 @@ export default function App() {
 
       const updateRamFromStatus = (statusData) => {
         try {
-          setRamStats(statusData?.ram || null);
+          if (statusData?.ram) {
+            console.log("[RAM DEBUG resumePending] RAM data:", statusData.ram);
+            setRamStats(statusData.ram);
+          } else {
+            console.warn("[RAM DEBUG resumePending] No ram field in statusData");
+            setRamStats(null);
+          }
         } catch {
           // ignore
         }

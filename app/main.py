@@ -119,6 +119,7 @@ def _memory_snapshot() -> dict:
     This is intentionally dependency-free (no psutil) and cheap enough
     to call on each /job/{id}/status poll.
     """
+    import sys
     rss_mb = None
     peak_rss_mb = None
     total_mb = None
@@ -133,7 +134,8 @@ def _memory_snapshot() -> dict:
                 rss_pages = int(parts[1])
                 page_size = os.sysconf("SC_PAGE_SIZE")
                 rss_mb = round((rss_pages * page_size) / (1024 * 1024))
-    except Exception:
+    except Exception as e:
+        print(f"[MEM] Failed to read /proc/self/statm: {e}", file=sys.stderr)
         rss_mb = None
 
     try:
@@ -152,7 +154,8 @@ def _memory_snapshot() -> dict:
                 total_mb = round(mem_total_kb / 1024)
             if mem_avail_kb is not None:
                 avail_mb = round(mem_avail_kb / 1024)
-    except Exception:
+    except Exception as e:
+        print(f"[MEM] Failed to read /proc/meminfo: {e}", file=sys.stderr)
         total_mb = None
         avail_mb = None
 
@@ -244,6 +247,11 @@ def _memory_snapshot() -> dict:
         out["total_mb"] = int(total_mb)
     if avail_mb is not None:
         out["avail_mb"] = int(avail_mb)
+
+    # Debug: log if we're missing critical fields
+    if "rss_mb" not in out:
+        print(f"[MEM WARNING] rss_mb missing in snapshot: {out}", file=sys.stderr)
+
     return out
 
 
