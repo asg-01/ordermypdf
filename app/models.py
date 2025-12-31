@@ -4,6 +4,53 @@ Pydantic models for request/response validation and AI intent parsing.
 
 from typing import List, Literal, Optional, Union
 from pydantic import BaseModel, Field
+from enum import Enum
+
+
+# ============================================
+# ERROR CLASSIFICATION MODELS
+# ============================================
+
+class ErrorTypeEnum(str, Enum):
+    """Error types for taxonomy"""
+    TYPO = "typo"
+    SHORTHAND = "shorthand"
+    VAGUE_INTENT = "vague_intent"
+    CONFLICTING_OPS = "conflicting_ops"
+    MISSING_PARAMETER = "missing_parameter"
+    INVALID_OPERATION_ORDER = "invalid_operation_order"
+    XML_UNICODE_ERROR = "xml_unicode_error"
+    FAKE_TEXT_LAYER = "fake_text_layer"
+    BROKEN_FONTS = "broken_fonts"
+    TYPE_INCOMPATIBLE = "type_incompatible"
+    OPERATION_NOT_SUPPORTED_FOR_TYPE = "operation_not_supported_for_type"
+    PDF_PARSING_FAILURE = "pdf_parsing_failure"
+    OCR_ENGINE_FAILURE = "ocr_engine_failure"
+    CONVERSION_CRASH = "conversion_crash"
+    OUT_OF_MEMORY = "out_of_memory"
+    TIMEOUT = "timeout"
+    EMPTY_OUTPUT = "empty_output"
+    CORRUPT_FILE = "corrupt_file"
+    UNSUPPORTED_FEATURE = "unsupported_feature"
+
+
+class ErrorSeverityEnum(str, Enum):
+    """Error severity levels"""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class ErrorResponse(BaseModel):
+    """Error response sent to user"""
+    status: Literal["error"]
+    error_type: ErrorTypeEnum
+    severity: ErrorSeverityEnum
+    user_message: str  # Human-friendly message
+    system_message: str  # Technical details for logging
+    action: str  # 'skip', 'retry', 'auto_fix', 'ask_user', 'block'
+    can_recover: bool = False
+    recovery_action: Optional[str] = None
 
 
 # ============================================
