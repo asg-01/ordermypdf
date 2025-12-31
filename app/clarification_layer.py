@@ -6,12 +6,26 @@ INTEGRATION WITH NEW MODULES:
 - command_intelligence.py: 3-stage resolution (parse → rephrase → clarify)
 - file_type_guards.py: Redundancy checks and compatibility validation
 - pipeline_definitions.py: Optimal operation ordering via registry
+- one_flow_resolver.py: 40K+ pattern One-Flow Resolution (NEW)
+- pattern_matching.py: Pattern matching engine for 40K cases (NEW)
+- pattern_validation.py: Guards and validation (NEW)
+- button_disambiguation.py: Button-based options when unclear (NEW)
 """
 
 from app.ai_parser import ai_parser
 from typing import Union
 from app.error_handler import ErrorClassifier
 from app.command_intelligence import CommandIntelligence, ResolutionPipeline
+
+# 40K Pattern Resolution imports (NON-BREAKING - only adds new capability)
+try:
+    from app.one_flow_resolver import OneFlowResolver, FileType as OneFlowFileType
+    from app.pattern_matching import PatternMatcher, match_command
+    from app.pattern_validation import PatternValidator, validate_pipeline, should_retry_on_error
+    from app.button_disambiguation import DisambiguationGenerator, build_disambiguation_ui
+    ONE_FLOW_AVAILABLE = True
+except ImportError:
+    ONE_FLOW_AVAILABLE = False
 from app.utils import (
     normalize_whitespace,
     fuzzy_match_keyword,
@@ -899,6 +913,92 @@ def _try_3stage_resolution(user_prompt: str, file_names: list[str], allow_multi:
     return None
 
 
+def _try_one_flow_resolution(user_prompt: str, file_names: list[str]) -> ClarificationResult | None:
+    """
+    Try the 40K+ pattern One-Flow Resolution.
+    
+    FLOW:
+    1. Local Normalizer (typos, shorthand, context prefixes)
+    2. Pattern Match (40K+ patterns)
+    3. Deterministic Guards (redundancy, compatibility, size-miss)
+    4. If unclear → Button-Based Disambiguation
+    
+    NON-BREAKING: Returns None to fall through to existing logic on any failure.
+    """
+    if not ONE_FLOW_AVAILABLE:
+        return None
+    
+    if not user_prompt or not file_names:
+        return None
+    
+    try:
+        # Get file type from primary file
+        primary = file_names[0]
+        ext = primary.rsplit(".", 1)[-1].lower() if "." in primary else "pdf"
+        
+        # Map extension to OneFlowFileType
+        type_map = {
+            "pdf": OneFlowFileType.PDF,
+            "docx": OneFlowFileType.DOCX,
+            "doc": OneFlowFileType.DOCX,
+            "jpg": OneFlowFileType.JPG,
+            "jpeg": OneFlowFileType.JPEG,
+            "png": OneFlowFileType.PNG,
+        }
+        source_type = type_map.get(ext, OneFlowFileType.PDF)
+        
+        # Step 1: Pattern Matching
+        matcher = PatternMatcher()
+        matched = matcher.match(user_prompt)
+        
+        if not matched or matched.confidence < 0.5:
+            # Low confidence - fall through to existing logic
+            return None
+        
+        # Step 2: Validation
+        validation_result = validate_pipeline(
+            matched.operations,
+            primary,
+            matched.target_format,
+            matched.target_size_mb
+        )
+        
+        if not validation_result.is_valid and validation_result.status.value == "ambiguous":
+            # Need disambiguation - generate button options
+            generator = DisambiguationGenerator()
+            response = generator.generate(
+                file_type=ext,
+                detected_operations=matched.operations,
+                detected_purpose=matched.purpose,
+                detected_size=f"{matched.target_size_mb}mb" if matched.target_size_mb else None
+            )
+            
+            # Return as clarification with options
+            return ClarificationResult(
+                clarification=response.message,
+                options=[btn.label for btn in response.buttons]
+            )
+        
+        # If we have valid operations, let the existing logic handle it
+        # This is NON-BREAKING - we only use One-Flow for disambiguation
+        if validation_result.is_valid and validation_result.adjusted_pipeline:
+            # Log for debugging
+            import logging
+            logging.getLogger(__name__).debug(
+                f"[ONE-FLOW] Validated pipeline: {validation_result.adjusted_pipeline}"
+            )
+        
+        # Fall through to let existing logic handle the actual parsing
+        # One-Flow is primarily for disambiguation
+        return None
+        
+    except Exception as e:
+        # Silently fall back - NON-BREAKING
+        import logging
+        logging.getLogger(__name__).debug(f"[ONE-FLOW] Error: {e}")
+        return None
+
+
 def clarify_intent(user_prompt: str, file_names: list[str], last_question: str = "", allow_multi: bool = True) -> ClarificationResult:
     """
     Try to parse the user's intent. Handle common patterns like 'compress to X MB', 'split 1st page', etc.
@@ -908,7 +1008,17 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
     1. _fix_common_connector_typos: Uses ErrorClassifier for typo/shorthand correction
     2. _try_3stage_resolution: Optional 3-stage resolution for ambiguous commands
     3. Error guards: File-type compatibility checks
+    4. _try_one_flow_resolution: 40K+ pattern One-Flow Resolution (NEW - NON-BREAKING)
     """
+    
+    # ============================================
+    # 40K ONE-FLOW RESOLUTION (NON-BREAKING)
+    # Try to use 40K+ pattern resolution for disambiguation
+    # Returns None to fall through on failure
+    # ============================================
+    one_flow_result = _try_one_flow_resolution(user_prompt, file_names)
+    if one_flow_result is not None:
+        return one_flow_result
     
     # Optional context from the UI: helps interpret very short replies.
     # Also normalizes a few common corpus typos (e.g., compres/splt).
