@@ -16,6 +16,18 @@ class Settings(BaseSettings):
     # Fallback: more capable model for complex/ambiguous cases
     llm_model: str = "llama-3.1-8b-instant"  # Primary: fast, high limits
     llm_model_fallback: str = "llama-3.3-70b-versatile"  # Fallback: more capable
+
+    # Rephrase / phraser pipeline (used when deterministic parsing is ambiguous)
+    enable_llm_rephrase: bool = True
+
+    # Baseten OpenAI-compatible endpoint (optional)
+    baseten_api_key: str | None = None
+    baseten_base_url: str = "https://inference.baseten.co/v1"
+    baseten_model: str = "openai/gpt-oss-120b"
+    baseten_timeout_seconds: float = 12.0
+
+    # Optional 3rd rephrase model (Groq). If unset, uses llm_model_fallback.
+    llm_model_rephrase_third: str | None = None
     
     # Server Configuration
     host: str = "0.0.0.0"

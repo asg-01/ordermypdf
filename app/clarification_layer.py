@@ -950,6 +950,23 @@ def _try_one_flow_resolution(user_prompt: str, file_names: list[str]) -> Clarifi
         # Step 1: Pattern Matching
         matcher = PatternMatcher()
         matched = matcher.match(user_prompt)
+
+        # If local matching is low-confidence, try an LLM phraser (NO user interruption).
+        # This is strictly non-breaking: if phraser isn't configured or fails, fall through.
+        try:
+            from app.config import settings
+            if (
+                getattr(settings, "enable_llm_rephrase", True)
+                and (not matched or matched.confidence < 0.5)
+            ):
+                from app.phraser import rephrase_with_fallback
+                out = rephrase_with_fallback(user_prompt, file_names=file_names)
+                if out and out.text and out.text.strip():
+                    rematched = matcher.match(out.text.strip())
+                    if rematched and rematched.confidence >= 0.5:
+                        matched = rematched
+        except Exception:
+            pass
         
         if not matched or matched.confidence < 0.5:
             # Low confidence - fall through to existing logic

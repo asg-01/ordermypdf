@@ -424,15 +424,35 @@ class ResolutionPipeline:
         
         Then re-parses with updated prompt.
         """
-        # This would call the LLM to rephrase
-        # For now, returns the original parsing after Stage 1 failed
-        parsing = CommandIntelligence.parse_command(prompt)
-        if parsing:
-            parsing.parsed_from_stage = "rephrased"
-            logger.info(f"[STAGE 2 REPHRASE] New confidence: {parsing.confidence:.2f}")
-            return parsing
-        
-        return None
+        try:
+            from app.config import settings
+            if not getattr(settings, "enable_llm_rephrase", True):
+                return None
+        except Exception:
+            # If config is unavailable, remain non-blocking.
+            return None
+
+        try:
+            from app.phraser import rephrase_with_fallback
+
+            # If prior_context is provided, include it in the prompt lightly.
+            # Keep it minimal to avoid changing semantics.
+            prompt_to_rephrase = prompt
+            if prior_context:
+                prompt_to_rephrase = f"{prompt}\nContext: {prior_context}"
+
+            out = rephrase_with_fallback(prompt_to_rephrase)
+            if not out or not out.text:
+                return None
+
+            parsing = CommandIntelligence.parse_command(out.text)
+            if parsing:
+                parsing.parsed_from_stage = "rephrased"
+                logger.info(f"[STAGE 2 REPHRASE:{out.provider}] New confidence: {parsing.confidence:.2f}")
+                return parsing
+            return None
+        except Exception:
+            return None
     
     @staticmethod
     def stage3_ask_clarification(
