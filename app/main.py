@@ -280,6 +280,9 @@ class SessionState:
     pending_base_instruction: str | None = None
     last_success_prompt: str | None = None
     last_success_intent: ParsedIntent | list[ParsedIntent] | None = None
+    intent_status: str = "UNRESOLVED"  # UNRESOLVED | RESOLVED
+    intent_source: str | None = None  # text | llm | button
+    locked_action: str | None = None  # canonical prompt to execute when locked
 
 
 _SESSIONS: dict[str, SessionState] = {}
@@ -305,6 +308,34 @@ def _clear_pending(st: SessionState | None) -> None:
     st.pending_options = None
     st.pending_base_instruction = None
     st.updated_at = time.time()
+
+
+def _reset_intent_lock(st: SessionState | None) -> None:
+    if not st:
+        return
+    st.intent_status = "UNRESOLVED"
+    st.intent_source = None
+    st.locked_action = None
+    st.updated_at = time.time()
+
+
+def _lock_intent(st: SessionState | None, action_text: str, source: str) -> None:
+    if not st:
+        return
+    st.intent_status = "RESOLVED"
+    st.intent_source = source
+    st.locked_action = normalize_whitespace(action_text)
+    st.updated_at = time.time()
+
+
+def _is_button_confirmation(st: SessionState | None, incoming_text: str) -> bool:
+    if not st or not st.pending_options:
+        return False
+    norm_reply = _normalize_ws(incoming_text)
+    if not norm_reply:
+        return False
+    normalized_options = {_normalize_ws(opt) for opt in (st.pending_options or []) if opt}
+    return norm_reply in normalized_options
 
 
 def cleanup_old_sessions(max_age_minutes: int = 30) -> None:
@@ -1092,12 +1123,23 @@ def process_job_background(job_id: str):
         job_queue.update_progress(job_id, 10, "Analyzing your request...")
         
         session = _get_session(session_id)
+
+        locked_prompt = None
+        if session and session.intent_status == "RESOLVED" and session.locked_action:
+            locked_prompt = session.locked_action
+        elif _is_button_confirmation(session, prompt):
+            _lock_intent(session, prompt, "button")
+            locked_prompt = session.locked_action
+
+        active_prompt = locked_prompt or prompt
+        prompt_to_parse = active_prompt
+        locked_mode = bool(locked_prompt)
         
         # Detect 'compress by X%' BEFORE calling AI parser
-        print(f"[JOB {job_id}] Prompt: {prompt}")
+        print(f"[JOB {job_id}] Prompt: {active_prompt}")
         print(f"[JOB {job_id}] Files: {file_names}")
         
-        percent_match = re.search(r"compress( this)?( pdf)? by (\d{1,3})%", prompt, re.IGNORECASE)
+        percent_match = re.search(r"compress( this)?( pdf)? by (\d{1,3})%", active_prompt, re.IGNORECASE)
         if percent_match and file_names:
             percent = int(percent_match.group(3))
             file_name = file_names[0]
@@ -1120,81 +1162,107 @@ def process_job_background(job_id: str):
                 job_queue.fail_job(job_id, f"File not found for compression: {file_name}")
                 return
         else:
-            # "do the same again" / "repeat" shortcut
-            if session and session.last_success_intent is not None:
-                if re.search(r"\b(same|again|repeat|do it again|do that again)\b", (prompt or ""), re.IGNORECASE):
-                    intent = session.last_success_intent
-                    _resolve_intent_filenames(intent, file_names)
-                    job_queue.update_progress(job_id, 30, "Repeating last operation...")
-                    try:
-                        if isinstance(intent, list):
-                            output_file, message = execute_operation_pipeline(intent, file_names)
-                            operation_name = "multi"
-                        else:
-                            output_file, message = execute_operation(intent)
-                            operation_name = intent.operation_type
-                    except Exception as e:
-                        job_queue.fail_job(job_id, str(e))
-                        return
-                    
-                    session.last_success_prompt = session.last_success_prompt or prompt
-                    session.last_success_intent = intent
+            if locked_mode:
+                job_queue.update_progress(job_id, 20, "Executing your confirmed choice...")
+                clarification_result = clarify_intent(active_prompt, file_names, last_question="")
+
+                if clarification_result.intent:
+                    intent = clarification_result.intent
+                    if isinstance(intent, list):
+                        print(f"[JOB {job_id}] Parsed (locked) multi-operation intent: {len(intent)} steps")
+                    else:
+                        print(f"[JOB {job_id}] Parsed (locked) intent: {intent.operation_type}")
                     _clear_pending(session)
-                    job_queue.complete_job(job_id, "success", message, operation_name, output_file)
+                    _reset_intent_lock(session)
+                else:
+                    print(f"[JOB {job_id}] Locked intent could not be executed: {clarification_result.clarification}")
+                    if session:
+                        _clear_pending(session)
+                        _reset_intent_lock(session)
+                    job_queue.complete_job(
+                        job_id,
+                        "error",
+                        clarification_result.clarification or "Could not execute confirmed action.",
+                        options=None
+                    )
                     return
-
-            # Use context question from request or session
-            effective_question = (context_question or "") or (session.pending_question if session else "") or ""
-
-            # Handle slot-filling for clarification flow
-            prompt_to_parse = prompt
-            if session and session.pending_question and session.pending_base_instruction:
-                normalized_reply = _normalize_ws(prompt)
-                normalized_options = {_normalize_ws(o) for o in (session.pending_options or [])}
-                if normalized_reply and normalized_reply in normalized_options:
-                    prompt_to_parse = prompt
-                else:
-                    if len(normalized_reply.split()) <= 6 or re.fullmatch(r"[0-9,\-\s]+", (prompt or "").strip()):
-                        prompt_to_parse = _build_prompt_from_reply(
-                            session.pending_base_instruction,
-                            session.pending_question,
-                            prompt,
-                        )
-
-            job_queue.update_progress(job_id, 20, "Understanding your request...")
-            
-            # Stage 1: Try direct parse first
-            clarification_result = clarify_intent(prompt_to_parse, file_names, last_question=effective_question)
-            
-            # Stage 2: If no intent but it's a short follow-up, try rephrasing with session context
-            if not clarification_result.intent and clarification_result.clarification and session:
-                from app.clarification_layer import _rephrase_with_context
-                rephrased = _rephrase_with_context(prompt_to_parse, session.last_success_intent, file_names)
-                if rephrased:
-                    print(f"[JOB {job_id}] Rephrased '{prompt_to_parse}' → '{rephrased}'")
-                    clarification_result = clarify_intent(rephrased, file_names, last_question=effective_question)
-            
-            if clarification_result.intent:
-                intent = clarification_result.intent
-                if isinstance(intent, list):
-                    print(f"[JOB {job_id}] Parsed multi-operation intent: {len(intent)} steps")
-                else:
-                    print(f"[JOB {job_id}] Parsed intent: {intent.operation_type}")
-                _clear_pending(session)
             else:
-                print(f"[JOB {job_id}] Clarification needed: {clarification_result.clarification}")
-                if session:
-                    session.pending_question = clarification_result.clarification
-                    session.pending_options = clarification_result.options
-                    session.pending_base_instruction = prompt_to_parse
-                # Return clarification as a "completed" job with options
-                job_queue.complete_job(
-                    job_id,
-                    "error",
-                    clarification_result.clarification,
-                    options=clarification_result.options
-                )
-                return
+                # "do the same again" / "repeat" shortcut
+                if session and session.last_success_intent is not None:
+                    if re.search(r"\b(same|again|repeat|do it again|do that again)\b", (active_prompt or ""), re.IGNORECASE):
+                        intent = session.last_success_intent
+                        _resolve_intent_filenames(intent, file_names)
+                        job_queue.update_progress(job_id, 30, "Repeating last operation...")
+                        try:
+                            if isinstance(intent, list):
+                                output_file, message = execute_operation_pipeline(intent, file_names)
+                                operation_name = "multi"
+                            else:
+                                output_file, message = execute_operation(intent)
+                                operation_name = intent.operation_type
+                        except Exception as e:
+                            job_queue.fail_job(job_id, str(e))
+                            return
+                        
+                        session.last_success_prompt = session.last_success_prompt or active_prompt
+                        session.last_success_intent = intent
+                        _clear_pending(session)
+                        job_queue.complete_job(job_id, "success", message, operation_name, output_file)
+                        _reset_intent_lock(session)
+                        return
+
+                # Use context question from request or session
+                effective_question = (context_question or "") or (session.pending_question if session else "") or ""
+
+                # Handle slot-filling for clarification flow
+                prompt_to_parse = active_prompt
+                if session and session.pending_question and session.pending_base_instruction:
+                    normalized_reply = _normalize_ws(active_prompt)
+                    normalized_options = {_normalize_ws(o) for o in (session.pending_options or [])}
+                    if normalized_reply and normalized_reply in normalized_options:
+                        prompt_to_parse = active_prompt
+                    else:
+                        if len(normalized_reply.split()) <= 6 or re.fullmatch(r"[0-9,\-\s]+", (active_prompt or "").strip()):
+                            prompt_to_parse = _build_prompt_from_reply(
+                                session.pending_base_instruction,
+                                session.pending_question,
+                                active_prompt,
+                            )
+
+                job_queue.update_progress(job_id, 20, "Understanding your request...")
+                
+                # Stage 1: Try direct parse first
+                clarification_result = clarify_intent(prompt_to_parse, file_names, last_question=effective_question)
+                
+                # Stage 2: If no intent but it's a short follow-up, try rephrasing with session context
+                if not clarification_result.intent and clarification_result.clarification and session:
+                    from app.clarification_layer import _rephrase_with_context
+                    rephrased = _rephrase_with_context(prompt_to_parse, session.last_success_intent, file_names)
+                    if rephrased:
+                        print(f"[JOB {job_id}] Rephrased '{prompt_to_parse}' → '{rephrased}'")
+                        clarification_result = clarify_intent(rephrased, file_names, last_question=effective_question)
+                
+                if clarification_result.intent:
+                    intent = clarification_result.intent
+                    if isinstance(intent, list):
+                        print(f"[JOB {job_id}] Parsed multi-operation intent: {len(intent)} steps")
+                    else:
+                        print(f"[JOB {job_id}] Parsed intent: {intent.operation_type}")
+                    _clear_pending(session)
+                else:
+                    print(f"[JOB {job_id}] Clarification needed: {clarification_result.clarification}")
+                    if session:
+                        session.pending_question = clarification_result.clarification
+                        session.pending_options = clarification_result.options
+                        session.pending_base_instruction = prompt_to_parse
+                    # Return clarification as a "completed" job with options
+                    job_queue.complete_job(
+                        job_id,
+                        "error",
+                        clarification_result.clarification,
+                        options=clarification_result.options
+                    )
+                    return
 
         # Fix common typos in filenames
         _resolve_intent_filenames(intent, file_names)
@@ -1268,11 +1336,14 @@ def process_job_background(job_id: str):
             print(f"[JOB {job_id}] Warning: Failed to cleanup: {cleanup_err}")
 
         job_queue.complete_job(job_id, "success", message, operation_name, output_file)
+        _reset_intent_lock(session)
         
     except Exception as e:
         print(f"[JOB {job_id}] Unexpected error: {e}")
         import traceback
         traceback.print_exc()
+        session = _get_session(job.session_id)
+        _reset_intent_lock(session)
         job_queue.fail_job(job_id, f"Unexpected error: {str(e)}")
 
 
@@ -1396,6 +1467,12 @@ async def submit_with_preupload(
             )
         
         file_names = preupload_data["files"]
+
+        session = _get_session(session_id)
+        prompt_to_use = prompt
+        if _is_button_confirmation(session, prompt):
+            _lock_intent(session, prompt, "button")
+            prompt_to_use = session.locked_action or prompt
         
         # Verify files still exist
         for fname in file_names:
@@ -1409,12 +1486,12 @@ async def submit_with_preupload(
         # Create job (starts processing in background)
         job_id = job_queue.create_job(
             files=file_names,
-            prompt=prompt,
+            prompt=prompt_to_use,
             session_id=session_id,
             context_question=context_question,
         )
         
-        print(f"[JOB CREATED from preupload] {job_id} - Files: {file_names}, Prompt: {prompt[:50]}...")
+        print(f"[JOB CREATED from preupload] {job_id} - Files: {file_names}, Prompt: {prompt_to_use[:50]}...")
         
         return {
             "job_id": job_id,
@@ -1452,16 +1529,22 @@ async def submit_job(
         
         # Save uploaded files
         file_names = await save_uploaded_files(files)
+
+        session = _get_session(session_id)
+        prompt_to_use = prompt
+        if _is_button_confirmation(session, prompt):
+            _lock_intent(session, prompt, "button")
+            prompt_to_use = session.locked_action or prompt
         
         # Create job (starts processing in background)
         job_id = job_queue.create_job(
             files=file_names,
-            prompt=prompt,
+            prompt=prompt_to_use,
             session_id=session_id,
             context_question=context_question,
         )
         
-        print(f"[JOB CREATED] {job_id} - Files: {file_names}, Prompt: {prompt[:50]}...")
+        print(f"[JOB CREATED] {job_id} - Files: {file_names}, Prompt: {prompt_to_use[:50]}...")
         
         
         return {
@@ -1506,14 +1589,20 @@ async def submit_job_reuse(
                 )
         
         # Create job (starts processing in background)
+        session = _get_session(session_id)
+        prompt_to_use = prompt
+        if _is_button_confirmation(session, prompt):
+            _lock_intent(session, prompt, "button")
+            prompt_to_use = session.locked_action or prompt
+
         job_id = job_queue.create_job(
             files=files_list,
-            prompt=prompt,
+            prompt=prompt_to_use,
             session_id=session_id,
             context_question=context_question,
         )
         
-        print(f"[JOB REUSE] {job_id} - Files: {files_list}, Prompt: {prompt[:50]}...")
+        print(f"[JOB REUSE] {job_id} - Files: {files_list}, Prompt: {prompt_to_use[:50]}...")
         
         return {
             "job_id": job_id,
@@ -1706,6 +1795,7 @@ async def process_pdfs(
     - Upload 1 or more PDF files
     - Prompt: "merge all these files" or "keep only page 1"
     """
+    session: SessionState | None = None
     try:
         # Validate file count
         if len(files) > settings.max_files_per_request:
@@ -1718,11 +1808,21 @@ async def process_pdfs(
         file_names = await save_uploaded_files(files)
 
         session = _get_session(session_id)
+        locked_prompt = None
+        if session and session.intent_status == "RESOLVED" and session.locked_action:
+            locked_prompt = session.locked_action
+        elif _is_button_confirmation(session, prompt):
+            _lock_intent(session, prompt, "button")
+            locked_prompt = session.locked_action
+
+        active_prompt = locked_prompt or prompt
+        prompt_to_parse = active_prompt
+        locked_mode = bool(locked_prompt)
         
         # Detect 'compress by X%' BEFORE calling AI parser
-        print(f"[REQ] Prompt: {prompt}")
+        print(f"[REQ] Prompt: {active_prompt}")
         print(f"[REQ] Files: {file_names}")
-        percent_match = re.search(r"compress( this)?( pdf)? by (\d{1,3})%", prompt, re.IGNORECASE)
+        percent_match = re.search(r"compress( this)?( pdf)? by (\d{1,3})%", active_prompt, re.IGNORECASE)
         if percent_match and file_names:
             percent = int(percent_match.group(3))
             file_name = file_names[0]  # Only support single file for now
@@ -1749,84 +1849,107 @@ async def process_pdfs(
                     message=f"File not found for compression: {file_name}"
                 )
         else:
-            # "do the same again" / "repeat" shortcut (must not re-parse)
-            if session and session.last_success_intent is not None:
-                if re.search(r"\b(same|again|repeat|do it again|do that again)\b", (prompt or ""), re.IGNORECASE):
-                    intent = session.last_success_intent
-                    _resolve_intent_filenames(intent, file_names)
-                    try:
-                        if isinstance(intent, list):
-                            output_file, message = execute_operation_pipeline(intent, file_names)
-                            operation_name = "multi"
-                        else:
-                            output_file, message = execute_operation(intent)
-                            operation_name = intent.operation_type
-                    except FileNotFoundError as e:
-                        raise HTTPException(status_code=404, detail=str(e))
-                    except ValueError as e:
-                        raise HTTPException(status_code=400, detail=str(e))
-                    except Exception as e:
-                        raise HTTPException(status_code=500, detail=f"Operation failed: {str(e)}")
+            if locked_mode:
+                clarification_result = clarify_intent(active_prompt, file_names, last_question="")
 
-                    session.last_success_prompt = session.last_success_prompt or prompt
-                    session.last_success_intent = intent
+                if clarification_result.intent:
+                    intent = clarification_result.intent
+                    if isinstance(intent, list):
+                        print(f"[AI] Parsed (locked) multi-operation intent: {len(intent)} steps")
+                    else:
+                        print(f"[AI] Parsed (locked) intent: {intent.operation_type}")
                     _clear_pending(session)
-                    return ProcessResponse(
-                        status="success",
-                        operation=operation_name,
-                        output_file=output_file,
-                        message=message,
-                    )
-
-            # Prefer UI-provided question; fallback to session's last asked question.
-            effective_question = (context_question or "") or (session.pending_question if session else "") or ""
-
-            # If we have a pending question, treat short replies as slot values and rebuild
-            # a full prompt that preserves already-locked steps.
-            prompt_to_parse = prompt
-            if session and session.pending_question and session.pending_base_instruction:
-                normalized_reply = _normalize_ws(prompt)
-                normalized_options = {_normalize_ws(o) for o in (session.pending_options or [])}
-                if normalized_reply and normalized_reply in normalized_options:
-                    prompt_to_parse = prompt
+                    _reset_intent_lock(session)
                 else:
-                    # Numeric-only or very short replies are almost always slot-fills.
-                    if len(normalized_reply.split()) <= 6 or re.fullmatch(r"[0-9,\-\s]+", (prompt or "").strip()):
-                        prompt_to_parse = _build_prompt_from_reply(
-                            session.pending_base_instruction,
-                            session.pending_question,
-                            prompt,
+                    print(f"[AI] Locked intent could not be executed: {clarification_result.clarification}")
+                    if session:
+                        _clear_pending(session)
+                        _reset_intent_lock(session)
+                    return ProcessResponse(
+                        status="error",
+                        message=clarification_result.clarification or "Could not execute confirmed action.",
+                        options=None
+                    )
+            else:
+                # "do the same again" / "repeat" shortcut (must not re-parse)
+                if session and session.last_success_intent is not None:
+                    if re.search(r"\b(same|again|repeat|do it again|do that again)\b", (active_prompt or ""), re.IGNORECASE):
+                        intent = session.last_success_intent
+                        _resolve_intent_filenames(intent, file_names)
+                        try:
+                            if isinstance(intent, list):
+                                output_file, message = execute_operation_pipeline(intent, file_names)
+                                operation_name = "multi"
+                            else:
+                                output_file, message = execute_operation(intent)
+                                operation_name = intent.operation_type
+                        except FileNotFoundError as e:
+                            raise HTTPException(status_code=404, detail=str(e))
+                        except ValueError as e:
+                            raise HTTPException(status_code=400, detail=str(e))
+                        except Exception as e:
+                            raise HTTPException(status_code=500, detail=f"Operation failed: {str(e)}")
+
+                        session.last_success_prompt = session.last_success_prompt or active_prompt
+                        session.last_success_intent = intent
+                        _clear_pending(session)
+                        _reset_intent_lock(session)
+                        return ProcessResponse(
+                            status="success",
+                            operation=operation_name,
+                            output_file=output_file,
+                            message=message,
                         )
 
-            clarification_result = clarify_intent(prompt_to_parse, file_names, last_question=effective_question)
-            
-            # Stage 2: If no intent but it's a short follow-up, try rephrasing with session context
-            if not clarification_result.intent and clarification_result.clarification and session:
-                from app.clarification_layer import _rephrase_with_context
-                rephrased = _rephrase_with_context(prompt_to_parse, session.last_success_intent, file_names)
-                if rephrased:
-                    print(f"[AI] Rephrased '{prompt_to_parse}' → '{rephrased}'")
-                    clarification_result = clarify_intent(rephrased, file_names, last_question=effective_question)
-            
-            if clarification_result.intent:
-                intent = clarification_result.intent
-                if isinstance(intent, list):
-                    print(f"[AI] Parsed multi-operation intent: {len(intent)} steps")
+                # Prefer UI-provided question; fallback to session's last asked question.
+                effective_question = (context_question or "") or (session.pending_question if session else "") or ""
+
+                # If we have a pending question, treat short replies as slot values and rebuild
+                # a full prompt that preserves already-locked steps.
+                prompt_to_parse = active_prompt
+                if session and session.pending_question and session.pending_base_instruction:
+                    normalized_reply = _normalize_ws(active_prompt)
+                    normalized_options = {_normalize_ws(o) for o in (session.pending_options or [])}
+                    if normalized_reply and normalized_reply in normalized_options:
+                        prompt_to_parse = active_prompt
+                    else:
+                        # Numeric-only or very short replies are almost always slot-fills.
+                        if len(normalized_reply.split()) <= 6 or re.fullmatch(r"[0-9,\-\s]+", (active_prompt or "").strip()):
+                            prompt_to_parse = _build_prompt_from_reply(
+                                session.pending_base_instruction,
+                                session.pending_question,
+                                active_prompt,
+                            )
+
+                clarification_result = clarify_intent(prompt_to_parse, file_names, last_question=effective_question)
+                
+                # Stage 2: If no intent but it's a short follow-up, try rephrasing with session context
+                if not clarification_result.intent and clarification_result.clarification and session:
+                    from app.clarification_layer import _rephrase_with_context
+                    rephrased = _rephrase_with_context(prompt_to_parse, session.last_success_intent, file_names)
+                    if rephrased:
+                        print(f"[AI] Rephrased '{prompt_to_parse}' → '{rephrased}'")
+                        clarification_result = clarify_intent(rephrased, file_names, last_question=effective_question)
+                
+                if clarification_result.intent:
+                    intent = clarification_result.intent
+                    if isinstance(intent, list):
+                        print(f"[AI] Parsed multi-operation intent: {len(intent)} steps")
+                    else:
+                        print(f"[AI] Parsed intent: {intent.operation_type}")
+                    _clear_pending(session)
                 else:
-                    print(f"[AI] Parsed intent: {intent.operation_type}")
-                _clear_pending(session)
-            else:
-                print(f"[AI] Clarification needed: {clarification_result.clarification}")
-                if session:
-                    session.pending_question = clarification_result.clarification
-                    session.pending_options = clarification_result.options
-                    # Persist the full plan prompt so far, not the raw short reply.
-                    session.pending_base_instruction = prompt_to_parse
-                return ProcessResponse(
-                    status="error",
-                    message=clarification_result.clarification,
-                    options=clarification_result.options
-                )
+                    print(f"[AI] Clarification needed: {clarification_result.clarification}")
+                    if session:
+                        session.pending_question = clarification_result.clarification
+                        session.pending_options = clarification_result.options
+                        # Persist the full plan prompt so far, not the raw short reply.
+                        session.pending_base_instruction = prompt_to_parse
+                    return ProcessResponse(
+                        status="error",
+                        message=clarification_result.clarification,
+                        options=clarification_result.options
+                    )
 
         # Fix common typos in filenames chosen by the model (or user)
         _resolve_intent_filenames(intent, file_names)
@@ -1881,6 +2004,9 @@ async def process_pdfs(
             status="error",
             message=f"Unexpected error: {str(e)}"
         )
+    finally:
+        if session and session.intent_status == "RESOLVED":
+            _reset_intent_lock(session)
 
 
 @app.get("/download/{filename}")
