@@ -11,7 +11,9 @@ class Settings(BaseSettings):
     
     # AI / LLM Configuration
     groq_api_key: str = "test-key-configure-in-env"
-    llm_model: str = "llama-3.3-70b-versatile"
+    # Free Groq models: llama-3.3-70b-versatile, gemma2-9b-it, mixtral-8x7b-32768, 
+    #                   llama-3.1-8b-instant, deepseek-r1-distill-llama-70b
+    llm_model: str = "gemma2-9b-it"
     
     # Server Configuration
     host: str = "0.0.0.0"
