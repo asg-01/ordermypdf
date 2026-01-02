@@ -1,16 +1,4 @@
-"""
-FastAPI Main Application - Orchestrates AI parsing and PDF processing.
 
-This is where the magic happens:
-1. User sends prompt + files
-2. AI parses intent → JSON
-3. Backend validates and executes using error handlers and guards
-4. Returns processed PDF
-
-OPTIMIZATIONS:
-- Lazy imports: Heavy libraries (PyMuPDF, ocrmypdf, opencv) loaded on-demand
-- Action 1: Saves 200MB on startup, reduces boot time 85%
-"""
 
 import os
 import shutil
