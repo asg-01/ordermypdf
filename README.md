@@ -1,73 +1,43 @@
-# OrderMyPDF
+# OrderMyPDF - AI-Controlled PDF Processor
 
-OrderMyPDF is an AI-powered PDF and document processor that lets you use natural language to perform advanced PDF operations. It features a FastAPI backend and a modern React frontend, supporting operations like merge, split, compress, convert, OCR, and more.
+A learning-focused MVP that uses natural language prompts to control PDF operations.
 
-## Features
-- Natural language prompt to control PDF operations
-- Supports PDF, DOCX, PNG, JPG/JPEG
-- Merge, split, compress, convert, OCR, reorder, watermark, and more
-- Multi-file upload with format consistency enforcement
-- Button-based disambiguation for unclear commands
-- Real-time progress and ETA
+## Architecture
 
-## Tech Stack
-- **Backend:** Python 3.10+, FastAPI, PyPDF, pydantic, APScheduler
-- **Frontend:** React, Vite, Tailwind CSS
-- **AI:** Groq LLM API, Baseten (optional), fallback LLMs
-- **Deployment:** Docker, Render.com, or any VM
-
-## Getting Started
-
-### 1. Clone the repository
-```bash
-git clone https://github.com/YOUR_USERNAME/ordermypdf.git
-cd ordermypdf
+```
+User Prompt
+   ↓
+AI Intent Parser (LLM)
+   ↓
+Structured JSON Plan
+   ↓
+Backend Executor (Python)
+   ↓
+Processed PDF Output
 ```
 
-### 2. Backend Setup
-- Create a Python virtual environment:
-  ```bash
-  python -m venv venv
-  source venv/bin/activate  # On Windows: venv\Scripts\activate
-  ```
-- Install dependencies:
-  ```bash
-  pip install -r requirements.txt
-  ```
-- Set up environment variables (see `.env.example`).
-- Start the FastAPI server:
-  ```bash
-  uvicorn app.main:app --reload
-  ```
+**Key Principle:** The AI does NOT process files. It only parses intent and outputs instructions.
 
-### 3. Frontend Setup
-- Go to the frontend directory:
-  ```bash
-  cd frontend
-  npm install
-  npm run dev
-  ```
-- Open [http://localhost:5173](http://localhost:5173) in your browser.
+## Supported Operations
 
-### 4. Usage
-- Upload your PDF(s) or supported files.
-- Enter a prompt (e.g., "merge these", "compress under 10MB", "convert to docx").
-- Download the processed result.
+- **Merge** multiple PDFs
+- **Split** PDF by page numbers
+- **Delete** specific pages from PDF
+- **Compress** PDF file size
 
-## Deployment
-- Supports Docker and Render.com (see Dockerfile and render.yaml).
-- For Render.com, connect your GitHub repo and set environment variables as needed.
+## Tech Stack
 
-## License
-This project is licensed under the MIT License. See the LICENSE file for details.
+- **Backend:** FastAPI + Python
+- **PDF Processing:** PyPDF
+- **AI:** Groq (free LLM API)
+- **Deployment:** Cloud VM with filesystem access
 
-## Contributing
-Pull requests and issues are welcome! Please open an issue for major changes.
+## Setup
 
-## Acknowledgments
-- Groq for LLM API
-- Baseten for fallback LLM
-- PyPDF, FastAPI, React, Tailwind CSS
+1. Clone the repository
+2. Create virtual environment:
+   ```bash
+   python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
