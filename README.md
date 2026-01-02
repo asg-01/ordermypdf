@@ -176,7 +176,13 @@ lsof -ti:8000 | xargs kill -9
 
 ## 📝 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This software is proprietary and confidential. All rights reserved. 
+
+**This is NOT open-source software.** Unauthorized copying, modification, distribution, or use is strictly prohibited.
+
+See the [LICENSE](LICENSE) file for the complete proprietary license agreement and terms.
+
+For commercial licensing inquiries, contact the copyright holder.
 
 ## 🙏 Acknowledgments
 
@@ -187,4 +193,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Made with ❤️ by the OrderMyPDF Team**
+**© 2025 Amritansh Singh. All rights reserved.**
