@@ -3913,9 +3913,13 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
     if not use_llm:
         # Prompt is garbage - don't waste LLM tokens
         print(f"[Sanitizer] Skipping LLM - reason: {reason}")
+        # Determine file type for appropriate suggestions
+        from app.prompt_sanitizer import get_file_type_from_names
+        file_type = get_file_type_from_names(file_names)
+        invalid_response = get_invalid_prompt_response(file_type)
         return ClarificationResult(
-            clarification=get_invalid_prompt_response(file_names).clarification,
-            options=get_invalid_prompt_response(file_names).options
+            clarification=invalid_response.get("message", "I couldn't understand that. Please try again."),
+            options=invalid_response.get("options", [])
         )
     
     try:
