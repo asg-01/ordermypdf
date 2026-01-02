@@ -726,7 +726,7 @@ async def save_uploaded_files(files: List[UploadFile]) -> List[str]:
     """
     file_names = []
     
-    allowed_exts = {".pdf", ".png", ".jpg", ".jpeg"}
+    allowed_exts = {".pdf", ".png", ".jpg", ".jpeg", ".docx"}
 
     for file in files:
         # Validate file type
@@ -737,7 +737,7 @@ async def save_uploaded_files(files: List[UploadFile]) -> List[str]:
                 status_code=400,
                 detail=(
                     f"Invalid file type: {file.filename}. "
-                    "Allowed: PDF and common images (png/jpg/jpeg)."
+                    "Allowed: PDF, images (png/jpg/jpeg), and DOCX."
                 ),
             )
         

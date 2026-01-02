@@ -1120,17 +1120,23 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
             )
         elif primary_lower.endswith(('.png', '.jpg', '.jpeg')):
             if len(file_names) >= 2:
-                options = ["combine into PDF", "enhance images"]
+                options = ["combine into PDF", "convert to docx", "enhance images"]
             else:
-                options = ["convert to PDF", "enhance", "OCR to searchable PDF"]
+                options = ["convert to PDF", "convert to docx", "enhance", "OCR to searchable PDF"]
             return ClarificationResult(
                 clarification="What would you like to do with your image? Here are some options:",
                 options=options
             )
+        elif primary_lower.endswith('.docx'):
+            options = ["convert to PDF", "convert to images"]
+            return ClarificationResult(
+                clarification="What would you like to do with your DOCX? Here are some options:",
+                options=options
+            )
         else:
             return ClarificationResult(
-                clarification="What would you like to do? Please describe the operation (e.g., 'compress', 'merge', 'split page 1').",
-                options=["compress", "merge", "split first page"]
+                clarification="What would you like to do? Please describe the operation (e.g., 'compress', 'merge', 'convert to pdf').",
+                options=["compress", "merge", "convert to pdf"]
             )
 
     # ============================================
@@ -1883,6 +1889,21 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
         # ========== IMAGE MULTI-OP PIPELINES ==========
         if is_image_file or all_images:
             
+            # Image(s) → DOCX: Images to PDF → PDF to DOCX
+            if wants_to_docx and (is_image_file or all_images):
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="images_to_pdf",
+                            images_to_pdf={"operation": "images_to_pdf", "files": file_names},
+                        ),
+                        ParsedIntent(
+                            operation_type="pdf_to_docx",
+                            pdf_to_docx={"operation": "pdf_to_docx", "file": primary},
+                        ),
+                    ]
+                )
+            
             # Images + merge/combine + compress → Images to PDF → Compress
             if (wants_merge or wants_to_pdf) and wants_compress and all_images:
                 preset = _infer_compress_preset(user_prompt)
@@ -2238,6 +2259,24 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
         
         # ========== DOCX MULTI-OP PIPELINES ==========
         if is_docx_file:
+            
+            # DOCX → Images: DOCX to PDF → PDF to Images
+            if wants_to_image and not wants_compress:
+                fmt = "png"
+                if re.search(r"\bjpe?g\b|\bjpg\b", prompt_for_match, re.IGNORECASE):
+                    fmt = "jpg"
+                return ClarificationResult(
+                    intent=[
+                        ParsedIntent(
+                            operation_type="docx_to_pdf",
+                            docx_to_pdf={"operation": "docx_to_pdf", "file": primary},
+                        ),
+                        ParsedIntent(
+                            operation_type="pdf_to_images",
+                            pdf_to_images={"operation": "pdf_to_images", "file": primary, "format": fmt, "dpi": 150},
+                        ),
+                    ]
+                )
             
             # DOCX + to PDF + compress → DOCX to PDF → Compress
             if wants_to_pdf and wants_compress:
@@ -3449,13 +3488,6 @@ def clarify_intent(user_prompt: str, file_names: list[str], last_question: str =
                 return ClarificationResult(clarification="Upload more images to combine, or just say 'to pdf'")
             if is_docx_file:
                 return ClarificationResult(clarification="Upload multiple files to merge")
-        
-        # Image to DOCX → suggest OCR
-        if wants_to_docx and is_image_file:
-            return ClarificationResult(
-                clarification="To extract text from image, try 'OCR' which creates a searchable PDF with embedded text",
-                options=["OCR this image"]
-            )
 
     # ============================================
     # END HARDCODED GUARDS

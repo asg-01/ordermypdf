@@ -1015,19 +1015,20 @@ export default function App() {
     if (!incoming.length) return;
 
     // Check for mixed file formats IMMEDIATELY when selecting files
-    // Backend only supports PDF and images (png/jpg/jpeg)
+    // Backend supports PDF, images (png/jpg/jpeg), and DOCX
     const getExt = (name) => (name || "").toLowerCase().split(".").pop();
     const getCategory = (ext) => {
       if (ext === "pdf") return "pdf";
       if (["png", "jpg", "jpeg"].includes(ext)) return "image";
-      return "unsupported"; // Backend only supports PDF and images
+      if (ext === "docx") return "docx";
+      return "unsupported";
     };
     
     // Check incoming files for unsupported types first
     const unsupportedFiles = incoming.filter((f) => getCategory(getExt(f.name)) === "unsupported");
     if (unsupportedFiles.length > 0) {
       setToast({
-        message: `⚠️ Unsupported file type: ${unsupportedFiles[0].name}. Only PDF and images (PNG/JPG) are supported.`,
+        message: `⚠️ Unsupported file type: ${unsupportedFiles[0].name}. Only PDF, images (PNG/JPG), and DOCX are supported.`,
         exiting: false,
       });
       setTimeout(() => {
@@ -1037,7 +1038,7 @@ export default function App() {
       return; // Block unsupported files
     }
 
-    // Check for mixed file formats (PDF + images not allowed together)
+    // Check for mixed file formats (different types not allowed together)
     const allFiles = [...files, ...incoming];
     if (allFiles.length > 1) {
       const categories = new Set(allFiles.map((f) => getCategory(getExt(f.name))));
@@ -1045,7 +1046,7 @@ export default function App() {
       categories.delete("unsupported");
       if (categories.size > 1) {
         setToast({
-          message: "⚠️ Please upload files of the same type. You can't mix PDFs and images together.",
+          message: "⚠️ Please upload files of the same type. You can't mix PDFs, images, and DOCX together.",
           exiting: false,
         });
         setTimeout(() => {
@@ -1915,7 +1916,7 @@ export default function App() {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept="application/pdf,image/png,image/jpeg"
+                      accept="application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                       multiple
                       onChange={handleFileChange}
                       className="hidden"
