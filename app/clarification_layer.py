@@ -10,6 +10,9 @@ INTEGRATION WITH NEW MODULES:
 - pattern_matching.py: Pattern matching engine for 40K cases (NEW)
 - pattern_validation.py: Guards and validation (NEW)
 - button_disambiguation.py: Button-based options when unclear (NEW)
+- llm_output_handler.py: Safe LLM output access and normalization (NEW)
+
+LLM OUTPUT SAFETY: All LLM output access uses safe_get() - never dot access.
 """
 
 from app.ai_parser import ai_parser
@@ -17,6 +20,14 @@ from typing import Union
 from app.error_handler import ErrorClassifier
 from app.command_intelligence import CommandIntelligence, ResolutionPipeline
 from app.prompt_sanitizer import should_use_llm, get_invalid_prompt_response
+from app.llm_output_handler import (
+    safe_get,
+    safe_get_nested,
+    strip_internal_keys,
+    normalize_for_ui,
+    check_clarification_loop,
+    UIResponseType
+)
 
 # 40K Pattern Resolution imports (NON-BREAKING - only adds new capability)
 try:

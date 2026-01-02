@@ -3,6 +3,8 @@ AI Intent Parser - Uses LLM to convert natural language to structured JSON.
 
 KEY PRINCIPLE: The AI does NOT access files or execute code.
 It ONLY parses user intent and outputs JSON instructions.
+
+LLM OUTPUT SAFETY: All LLM output access uses safe_get() - never dot access.
 """
 
 import json
@@ -10,6 +12,7 @@ from typing import Union
 from groq import Groq
 from app.config import settings
 from app.models import ParsedIntent
+from app.llm_output_handler import safe_get, safe_get_nested
 import re
 
 # ============================================
@@ -631,12 +634,12 @@ Parse this into JSON:"""
                     raise
             
             # If primary model needs clarification and we have a fallback, try fallback
-            if parsed_json.get("needs_clarification") and self.fallback_model != self.primary_model:
+            if safe_get(parsed_json, "needs_clarification") and self.fallback_model != self.primary_model:
                 print(f"[AI] Primary model uncertain, trying fallback: {self.fallback_model}")
                 try:
                     fallback_json = self._call_model(self.fallback_model, user_message)
                     # Use fallback result if it's more confident (no clarification needed)
-                    if not fallback_json.get("needs_clarification"):
+                    if not safe_get(fallback_json, "needs_clarification"):
                         print(f"[AI] Fallback model succeeded")
                         parsed_json = fallback_json
                 except Exception as e:
@@ -649,12 +652,12 @@ Parse this into JSON:"""
                 strings like "all"/"all pages"; treat those as None (= all pages).
                 """
                 try:
-                    if obj.get("operation_type") != "rotate":
+                    if safe_get(obj, "operation_type") != "rotate":
                         return
-                    rotate = obj.get("rotate")
+                    rotate = safe_get(obj, "rotate")
                     if not isinstance(rotate, dict):
                         return
-                    pages = rotate.get("pages")
+                    pages = safe_get(rotate, "pages")
                     if isinstance(pages, str):
                         p = pages.strip().lower()
                         if p in {"all", "all pages", "every", "every page", "entire"}:
@@ -663,10 +666,10 @@ Parse this into JSON:"""
                     return
             
             # Check if AI is requesting clarification
-            if parsed_json.get("needs_clarification"):
-                question = parsed_json.get("question", "Could you please clarify your request?")
-                suggested_format = parsed_json.get("suggested_format", "")
-                options = parsed_json.get("options", [])
+            if safe_get(parsed_json, "needs_clarification"):
+                question = safe_get(parsed_json, "question", "Could you please clarify your request?")
+                suggested_format = safe_get(parsed_json, "suggested_format", "")
+                options = safe_get(parsed_json, "options", [])
                 
                 clarification_msg = f"{question}\n\n{suggested_format}" if suggested_format else question
                 
@@ -678,12 +681,13 @@ Parse this into JSON:"""
                 raise ValueError(f"CLARIFICATION_NEEDED: {clarification_msg}")
 
             # Multi-operation plan
-            if parsed_json.get("is_multi_operation") and isinstance(parsed_json.get("operations"), list):
+            if safe_get(parsed_json, "is_multi_operation") and isinstance(safe_get(parsed_json, "operations"), list):
               intents: list[ParsedIntent] = []
               for op in parsed_json["operations"]:
                 if isinstance(op, dict):
                   _sanitize_rotate_pages(op)
                 intents.append(ParsedIntent(**op))
+              return intents
               return intents
 
             if isinstance(parsed_json, dict):
