@@ -1014,17 +1014,6 @@ export default function App() {
 
     if (!incoming.length) return;
 
-    // Check for mixed file types (by extension)
-    const getExt = (f) => (f.name || "").split(".").pop().toLowerCase();
-    const allFiles = files.concat(incoming);
-    const exts = new Set(allFiles.map(getExt));
-    if (exts.size > 1) {
-      window.alert(
-        "Please upload only files of the same type (all PDF, all images, or all DOCX). Mixed formats are not allowed."
-      );
-      return;
-    }
-
     // Deduplicate by name+size to avoid accidental duplicates.
     const keyOf = (f) => `${f?.name || ""}::${f?.size || 0}`;
     const existingKeys = new Set(files.map(keyOf));
