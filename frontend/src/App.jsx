@@ -1014,6 +1014,27 @@ export default function App() {
 
     if (!incoming.length) return;
 
+    // Check for mixed file formats when uploading multiple files
+    const getFileCategory = (fileName) => {
+      const ext = (fileName || "").toLowerCase().split(".").pop();
+      if (ext === "pdf") return "pdf";
+      if (["png", "jpg", "jpeg"].includes(ext)) return "image";
+      if (ext === "docx" || ext === "doc") return "docx";
+      return "other";
+    };
+
+    const allFiles = [...files, ...incoming];
+    if (allFiles.length > 1) {
+      const categories = new Set(allFiles.map((f) => getFileCategory(f.name)));
+      if (categories.size > 1) {
+        showToast(
+          "⚠️ Please upload files of the same type (all PDFs, all images, or all DOCX). Mixed formats are not supported.",
+          5000
+        );
+        return;
+      }
+    }
+
     // Deduplicate by name+size to avoid accidental duplicates.
     const keyOf = (f) => `${f?.name || ""}::${f?.size || 0}`;
     const existingKeys = new Set(files.map(keyOf));
