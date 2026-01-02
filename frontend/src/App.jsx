@@ -1014,6 +1014,31 @@ export default function App() {
 
     if (!incoming.length) return;
 
+    // Check for mixed file formats IMMEDIATELY when selecting files
+    const getExt = (name) => (name || "").toLowerCase().split(".").pop();
+    const getCategory = (ext) => {
+      if (ext === "pdf") return "pdf";
+      if (["png", "jpg", "jpeg"].includes(ext)) return "image";
+      if (ext === "docx" || ext === "doc") return "docx";
+      return "other";
+    };
+    
+    const allFiles = [...files, ...incoming];
+    if (allFiles.length > 1) {
+      const categories = new Set(allFiles.map((f) => getCategory(getExt(f.name))));
+      if (categories.size > 1) {
+        setToast({
+          message: "⚠️ Please upload files of the same type (all PDFs, all images, or all DOCX). Mixed formats are not supported.",
+          exiting: false,
+        });
+        setTimeout(() => {
+          setToast((t) => (t ? { ...t, exiting: true } : null));
+          setTimeout(() => setToast(null), 300);
+        }, 5000);
+        return; // Block mixed formats immediately
+      }
+    }
+
     // Deduplicate by name+size to avoid accidental duplicates.
     const keyOf = (f) => `${f?.name || ""}::${f?.size || 0}`;
     const existingKeys = new Set(files.map(keyOf));
@@ -1032,29 +1057,6 @@ export default function App() {
     if (!accepted.length) return;
 
     const next = files.concat(accepted);
-
-    // Check for mixed file formats when multiple files
-    if (next.length > 1) {
-      const getExt = (name) => (name || "").toLowerCase().split(".").pop();
-      const getCategory = (ext) => {
-        if (ext === "pdf") return "pdf";
-        if (["png", "jpg", "jpeg"].includes(ext)) return "image";
-        if (ext === "docx" || ext === "doc") return "docx";
-        return "other";
-      };
-      const categories = new Set(next.map((f) => getCategory(getExt(f.name))));
-      if (categories.size > 1) {
-        setToast({
-          message: "⚠️ Please upload files of the same type (all PDFs, all images, or all DOCX). Mixed formats are not supported.",
-          exiting: false,
-        });
-        setTimeout(() => {
-          setToast((t) => (t ? { ...t, exiting: true } : null));
-          setTimeout(() => setToast(null), 300);
-        }, 5000);
-        return; // Don't accept mixed formats
-      }
-    }
 
     setFiles(next);
     setLastFileName(accepted[accepted.length - 1].name);
