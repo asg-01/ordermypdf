@@ -109,6 +109,3 @@ This is an **educational project** to learn:
 - Production scalability
 - Multi-format support (DOCX, images, etc.)
 
-## License
-
-Educational/Personal Use
