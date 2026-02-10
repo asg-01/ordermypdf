@@ -1,6 +1,6 @@
 # OrderMyPDF - AI-Controlled PDF Processor
 
-A learning-focused MVP that uses natural language prompts to control PDF operations.
+A learning-focused MVP that uses natural language prompts to control PDF operations,Side project completly building for non production use ,sometimes won't give desired output due its cloud limitations!
 
 ## Architecture
 
